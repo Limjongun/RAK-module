@@ -83,6 +83,30 @@ export async function initLocalDB() {
   });
 }
 
+// Helper sinkronisasi antrean outbox ke Supabase
+export async function addToSyncQueue(table, action, dataOrId) {
+  try {
+    const db = await initLocalDB();
+    if (db.objectStoreNames.contains('sync_queue')) {
+      const entry = {
+        table,
+        action,
+        created_at: new Date().toISOString()
+      };
+      if (action === 'delete') {
+        entry.id = dataOrId;
+      } else {
+        const payload = { ...dataOrId };
+        delete payload._cachedBlob;
+        entry.data = payload;
+      }
+      await db.add('sync_queue', entry);
+    }
+  } catch (err) {
+    console.warn('addToSyncQueue error:', err);
+  }
+}
+
 export async function saveLocalDocument(doc, pdfBlob = null) {
   const db = await initLocalDB();
   const item = { ...doc, updated_at: doc.updated_at || new Date().toISOString() };
@@ -90,7 +114,14 @@ export async function saveLocalDocument(doc, pdfBlob = null) {
     item._cachedBlob = pdfBlob;
   }
   await db.put('documents', item);
+  await addToSyncQueue('documents', 'upsert', item);
   return item;
+}
+
+export async function deleteLocalDocument(id) {
+  const db = await initLocalDB();
+  await db.delete('documents', id);
+  await addToSyncQueue('documents', 'delete', id);
 }
 
 export async function getLocalDocument(id) {
@@ -191,6 +222,7 @@ export async function saveLocalFlashcard(card) {
     updated_at: now
   };
   await db.put('flashcards', item);
+  await addToSyncQueue('flashcards', 'upsert', item);
   return item;
 }
 
@@ -207,7 +239,8 @@ export async function getDueLocalFlashcards() {
 
 export async function deleteLocalFlashcard(id) {
   const db = await initLocalDB();
-  return db.delete('flashcards', id);
+  await db.delete('flashcards', id);
+  await addToSyncQueue('flashcards', 'delete', id);
 }
 
 // Study Sessions (Pomodoro & Reading Time Tracking)
@@ -221,7 +254,9 @@ export async function recordStudySession(session) {
     created_at: new Date().toISOString()
   };
   const id = await db.add('study_sessions', item);
-  return { id, ...item };
+  const fullItem = { id, ...item };
+  await addToSyncQueue('study_sessions', 'upsert', fullItem);
+  return fullItem;
 }
 
 export async function getAllStudySessions() {
@@ -330,12 +365,14 @@ export async function saveCodeNotebook(notebook) {
     updated_at: now
   };
   await db.put('code_notebooks', item);
+  await addToSyncQueue('code_notebooks', 'upsert', item);
   return item;
 }
 
 export async function deleteCodeNotebook(id) {
   const db = await initLocalDB();
-  return db.delete('code_notebooks', id);
+  await db.delete('code_notebooks', id);
+  await addToSyncQueue('code_notebooks', 'delete', id);
 }
 
 export async function seedSampleCodeNotebooksIfEmpty() {
@@ -481,6 +518,7 @@ export async function saveTodo(todo) {
       updated_at: now
     };
     await db.put('todos', item);
+    await addToSyncQueue('todos', 'upsert', item);
     return item;
   } catch (err) {
     console.warn('saveTodo error:', err);
@@ -493,6 +531,7 @@ export async function deleteTodo(id) {
     const db = await initLocalDB();
     if (db.objectStoreNames.contains('todos')) {
       await db.delete('todos', id);
+      await addToSyncQueue('todos', 'delete', id);
     }
   } catch (err) {
     console.warn('deleteTodo error:', err);
@@ -509,6 +548,7 @@ export async function toggleTodoComplete(id) {
     item.completed_at = item.completed ? new Date().toISOString() : null;
     item.updated_at = new Date().toISOString();
     await db.put('todos', item);
+    await addToSyncQueue('todos', 'upsert', item);
     return item;
   } catch (err) {
     console.warn('toggleTodoComplete error:', err);

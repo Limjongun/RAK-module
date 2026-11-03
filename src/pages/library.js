@@ -1,5 +1,7 @@
 // Rak Modul — Halaman Utama (Library / Shelf View)
 import { getAllLocalDocuments, getLocalProgress, getLocalAnnotations, saveLocalDocument, saveLocalPages, getDueLocalFlashcards, getAllTodos } from '../data/local-db.js';
+import { getSupabaseCredentials, saveSupabaseCredentials, isSupabaseConfigured } from '../data/supabase.js';
+import { fullSync, testSupabaseConnection, getSyncState } from '../data/sync.js';
 import { PdfViewer } from '../reader/pdf-view.js';
 import { showToast } from '../ui/toast.js';
 import { icon } from '../ui/icons.js';
@@ -42,6 +44,8 @@ export function LibraryPage({ container, router }) {
     const allTodos = await getAllTodos().catch(() => []);
     const pendingTodos = allTodos.filter(t => !t.completed);
     const recentDoc = docs.find(d => d.progress && d.progress.percent > 0) || docs[0];
+    const isConfigured = isSupabaseConfigured();
+    const credentials = getSupabaseCredentials();
 
     // Kelompokkan per mata kuliah
     const coursesMap = new Map();
@@ -67,6 +71,10 @@ export function LibraryPage({ container, router }) {
           </label>
           <button class="rm-btn rm-btn-ghost rm-btn-icon" id="rm-theme-toggle" aria-label="Ganti tema">
             ${isDarkMode ? icon('sun') : icon('moon')}
+          </button>
+          <button class="rm-btn rm-btn-ghost" id="rm-btn-cloud-sync" title="Pengaturan Sinkronisasi Supabase Cloud" style="display:inline-flex;align-items:center;gap:4px;">
+            ${icon('cloud')}
+            <span style="font-size:12px;">${isConfigured ? '🟢 Cloud' : 'Cloud'}</span>
           </button>
           <button class="rm-btn rm-btn-ghost" id="rm-btn-install-pwa" style="display:none;" title="Pasang Rak Modul ke Layar Utama HP / Laptop">
             ${icon('download')} Pasang Aplikasi
@@ -202,10 +210,162 @@ export function LibraryPage({ container, router }) {
                 .join('')
         }
       </main>
+
+      <!-- MODAL PENGATURAN SINKRONISASI SUPABASE CLOUD -->
+      <div id="rm-modal-cloud-sync" class="rm-modal-backdrop" style="display:none;">
+        <div class="rm-modal" style="max-width:520px;">
+          <div class="rm-modal-header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="color:var(--pen);">${icon('cloud')}</span>
+              <h3 class="rm-modal-title" style="margin:0;">Sinkronisasi Supabase Cloud</h3>
+            </div>
+            <button id="rm-btn-close-sync-modal" class="rm-colab-btn-icon">${icon('close')}</button>
+          </div>
+          <div class="rm-modal-body" style="display:flex;flex-direction:column;gap:var(--space-3);">
+            <div style="padding:10px 12px;background:var(--surface-sunken);border-radius:var(--radius-md);font-size:12.5px;line-height:1.5;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                <span style="font-weight:600;">Status Database:</span>
+                <span class="${isConfigured ? 'rm-badge rm-badge-green' : 'rm-badge'}" style="font-size:11px;">
+                  ${isConfigured ? '🟢 Terhubung ke Cloud' : '⚪ Mode Offline Lokal'}
+                </span>
+              </div>
+              <p style="margin:0;color:var(--ink-muted);font-size:12px;">
+                Sinkronkan seluruh modul, halaman, coretan stylus/stabilo, catatan, progres baca, to-do list, kode bank, dan flashcards antara HP &amp; Laptop secara otomatis.
+              </p>
+            </div>
+
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--ink-muted);display:block;margin-bottom:4px;">Project URL Supabase</label>
+              <input id="rm-sync-url" type="url" class="rm-input" style="width:100%;font-family:monospace;font-size:12px;" placeholder="https://xxxxxxxx.supabase.co" value="${credentials.url || ''}" />
+            </div>
+
+            <div>
+              <label style="font-size:12px;font-weight:600;color:var(--ink-muted);display:block;margin-bottom:4px;">Anon Public Key Supabase</label>
+              <input id="rm-sync-key" type="password" class="rm-input" style="width:100%;font-family:monospace;font-size:12px;" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." value="${credentials.key || ''}" />
+            </div>
+
+            <div id="rm-sync-msg-box" style="display:none;padding:8px 12px;border-radius:var(--radius-md);font-size:12.5px;"></div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--line);flex-wrap:wrap;">
+              <button id="rm-btn-save-test-sync" class="rm-btn rm-btn-primary" style="font-size:12px;height:32px;">
+                ${icon('check')} Simpan &amp; Uji Koneksi
+              </button>
+
+              <div style="display:flex;gap:var(--space-2);align-items:center;">
+                ${isConfigured ? `
+                  <button id="rm-btn-trigger-sync" class="rm-btn rm-btn-ghost" style="font-size:12px;height:32px;color:var(--pen);">
+                    ${icon('sync')} Sinkronkan Sekarang
+                  </button>
+                  <button id="rm-btn-disconnect-sync" class="rm-btn rm-btn-ghost rm-danger" style="font-size:12px;height:32px;" title="Putuskan koneksi cloud dan kembali ke mode lokal">
+                    Putuskan
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     `;
 
     // Pasang Event Listeners
     container.querySelector('#rm-theme-toggle').addEventListener('click', toggleTheme);
+
+    // Modal Cloud Sync
+    const syncBtn = container.querySelector('#rm-btn-cloud-sync');
+    const syncModal = container.querySelector('#rm-modal-cloud-sync');
+    const closeSyncBtn = container.querySelector('#rm-btn-close-sync-modal');
+    const saveTestBtn = container.querySelector('#rm-btn-save-test-sync');
+    const triggerSyncBtn = container.querySelector('#rm-btn-trigger-sync');
+    const disconnectBtn = container.querySelector('#rm-btn-disconnect-sync');
+    const syncMsgBox = container.querySelector('#rm-sync-msg-box');
+    const urlInput = container.querySelector('#rm-sync-url');
+    const keyInput = container.querySelector('#rm-sync-key');
+
+    if (syncBtn && syncModal) {
+      syncBtn.addEventListener('click', () => {
+        syncModal.style.display = 'flex';
+        if (syncMsgBox) syncMsgBox.style.display = 'none';
+      });
+    }
+
+    if (closeSyncBtn && syncModal) {
+      closeSyncBtn.addEventListener('click', () => {
+        syncModal.style.display = 'none';
+      });
+      syncModal.addEventListener('click', (e) => {
+        if (e.target === syncModal) syncModal.style.display = 'none';
+      });
+    }
+
+    if (saveTestBtn) {
+      saveTestBtn.addEventListener('click', async () => {
+        const url = (urlInput?.value || '').trim();
+        const key = (keyInput?.value || '').trim();
+
+        if (!url || !key) {
+          if (syncMsgBox) {
+            syncMsgBox.style.display = 'block';
+            syncMsgBox.style.background = 'rgba(179,38,30,0.1)';
+            syncMsgBox.style.color = 'var(--correction)';
+            syncMsgBox.textContent = 'Harap isi Project URL dan Anon Key Supabase.';
+          }
+          return;
+        }
+
+        saveTestBtn.setAttribute('disabled', 'true');
+        saveTestBtn.textContent = 'Menguji koneksi...';
+
+        saveSupabaseCredentials(url, key);
+        const testRes = await testSupabaseConnection();
+
+        saveTestBtn.removeAttribute('disabled');
+        saveTestBtn.innerHTML = `${icon('check')} Simpan & Uji Koneksi`;
+
+        if (syncMsgBox) {
+          syncMsgBox.style.display = 'block';
+          if (testRes.ok) {
+            syncMsgBox.style.background = 'rgba(40,167,69,0.1)';
+            syncMsgBox.style.color = '#1e7e34';
+            syncMsgBox.textContent = 'Koneksi Sukses! Menjalankan sinkronisasi dua arah...';
+            showToast('Koneksi Supabase aktif');
+            fullSync().then(() => {
+              showToast('Seluruh modul, to-do, dan catatan tersinkronisasi');
+              render();
+            });
+          } else {
+            syncMsgBox.style.background = 'rgba(179,38,30,0.1)';
+            syncMsgBox.style.color = 'var(--correction)';
+            syncMsgBox.innerHTML = `<b>Koneksi Gagal:</b> ${testRes.message}<br><small style="margin-top:4px;display:block;">Pastikan Anda telah menjalankan skema SQL migration di Supabase SQL Editor.</small>`;
+          }
+        }
+      });
+    }
+
+    if (triggerSyncBtn) {
+      triggerSyncBtn.addEventListener('click', async () => {
+        triggerSyncBtn.setAttribute('disabled', 'true');
+        triggerSyncBtn.textContent = 'Menyinkronkan...';
+        const res = await fullSync();
+        triggerSyncBtn.removeAttribute('disabled');
+        triggerSyncBtn.innerHTML = `${icon('sync')} Sinkronkan Sekarang`;
+        if (res.success) {
+          showToast('Sinkronisasi cloud berhasil!');
+          render();
+        } else {
+          alert('Gagal sinkron: ' + (res.error || res.reason));
+        }
+      });
+    }
+
+    if (disconnectBtn) {
+      disconnectBtn.addEventListener('click', () => {
+        if (confirm('Putuskan koneksi ke Supabase dan kembali ke mode penyimpanan lokal?')) {
+          saveSupabaseCredentials('', '');
+          showToast('Koneksi Supabase diputuskan');
+          render();
+        }
+      });
+    }
 
     const loadSampleBtn = container.querySelector('#rm-btn-load-sample');
     if (loadSampleBtn) {
