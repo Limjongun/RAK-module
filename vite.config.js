@@ -9,7 +9,15 @@ export default defineConfig({
     include: ['pdfjs-dist']
   },
   build: {
-    target: 'esnext'
+    target: 'esnext',
+    chunkSizeWarningLimit: 2500,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-pdf': ['pdfjs-dist', 'pdf-lib'],
+          'vendor-docs': ['docx-preview', 'mammoth', 'jszip']
+        }
+      }
+    }
   }
 });
-

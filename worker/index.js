@@ -65,6 +65,11 @@ export default {
       }
     }
 
+    // Fallback: Layani file statis frontend (dist/) jika binding ASSETS tersedia
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
+    }
+
     return new Response('Not Found', { status: 404, headers: corsHeaders });
   },
 
