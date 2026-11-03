@@ -60,6 +60,16 @@
 }
 
 /* Single PDF Page Container */
+.rm-pdf-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 .rm-pdf-page {
   position: relative;
   background: var(--sheet);
@@ -265,31 +275,34 @@
   }
 
   .rm-reader-header-left {
-    gap: var(--space-1);
+    gap: var(--space-2);
     min-width: 0;
     flex: 1;
   }
 
+  /* Sembunyikan judul buku di HP kecil (<600px) agar muat indikator halaman dan tombol aksi */
   .rm-reader-title {
-    max-width: 120px;
-    font-size: 13px;
+    display: none;
   }
 
   #rm-page-indicator {
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 500;
     white-space: nowrap;
+    color: var(--ink-muted);
   }
 
   /* Sembunyikan tombol zoom manual di HP karena pengguna memakai cubit-layar (pinch to zoom) */
   #rm-btn-zoom-in,
   #rm-btn-zoom-out,
-  #rm-zoom-val {
+  #rm-zoom-val,
+  .rm-reader-header .rm-sep {
     display: none !important;
   }
 
   /* Widget Pomodoro kompak di mobile */
   .rm-pomo-widget {
-    padding: 1px 6px !important;
+    padding: 2px 6px !important;
     gap: 4px !important;
   }
 
@@ -309,16 +322,34 @@
     border-left: 1px solid var(--line);
   }
 
+  /* VIEWPORT: Di mobile gunakan block & width 100% agar tidak ada pergeseran flexbox ke kiri */
   .rm-reader-viewport {
-    padding: var(--space-3) var(--space-1);
-    gap: var(--space-4);
-    width: 100%;
+    display: block !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding: 8px 8px 90px !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  /* STAGE PDF & WORD: 100% Lebar Layar */
+  .rm-pdf-stage,
+  #rm-pdf-container {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
   }
 
   /* Kanvas PDF fleksibel sesuai lebar HP */
   .rm-pdf-page {
+    width: 100% !important;
     max-width: 100% !important;
+    margin: 0 auto 16px !important;
     border-radius: var(--radius-sm);
+    box-sizing: border-box !important;
   }
 
   .rm-pdf-canvas {
@@ -328,31 +359,72 @@
 
   /* Dokumen Word DOCX responsif di layar kecil */
   .rm-docx-container {
-    width: 100% !important;
-    padding: 0 var(--space-1) !important;
-  }
-
-  .rm-docx-container section.docx {
+    display: block !important;
     width: 100% !important;
     max-width: 100% !important;
-    padding: var(--space-4) var(--space-3) !important;
-    margin: 0 auto var(--space-3) !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  .rm-docx-container section.docx,
+  section.docx.rm-pdf-page,
+  section.docx {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    min-height: auto !important;
+    padding: 16px 14px !important;
+    margin: 0 0 16px 0 !important;
     box-sizing: border-box !important;
     border-radius: var(--radius-sm) !important;
+    overflow-x: hidden !important;
+  }
+
+  .rm-docx-container section.docx > article {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Bungkus kata dan teks agar tidak pernah menabrak tepi kanan */
+  .rm-docx-container section.docx *:not(table, tbody, tr, td, th) {
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow-wrap: break-word !important;
+    word-break: break-word !important;
+  }
+
+  /* Atasi indentasi ekstrim bawaan Word */
+  .rm-docx-container section.docx [style*="margin-left"] {
+    margin-left: 0 !important;
+  }
+
+  /* Gambar dan canvas responsif */
+  .rm-docx-container img,
+  .rm-docx-container svg,
+  .rm-docx-container canvas {
+    max-width: 100% !important;
+    height: auto !important;
+    object-fit: contain !important;
   }
 
   /* Tabel di dalam dokumen dapat digeser horisontal secara aman tanpa merusak layout */
-  .rm-docx-container table {
+  .rm-table-scroll {
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
+    margin: 12px 0 !important;
+    padding-bottom: 4px !important;
   }
 
-  .rm-docx-container img {
-    max-width: 100% !important;
-    height: auto !important;
+  .rm-table-scroll table,
+  .rm-docx-container table {
+    width: max-content !important;
+    max-width: none !important;
+    border-collapse: collapse !important;
   }
 
   /* Pemutar TTS mengambang di bawah pas dengan lebar smartphone */
@@ -413,6 +485,14 @@
 
   .rm-floating-toolbar .rm-sep {
     margin: 2px 2px;
+  }
+}
+
+@media (min-width: 601px) and (max-width: 768px) {
+  .rm-reader-title {
+    display: inline-block;
+    max-width: 140px;
+    font-size: 13px;
   }
 }
 

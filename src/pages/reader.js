@@ -115,7 +115,7 @@ export function ReaderPage({ container, params, query, router }) {
 
         <div class="rm-reader-body">
           <div class="rm-reader-viewport" id="rm-viewport">
-            <div id="rm-pdf-container" style="display:flex;flex-direction:column;align-items:center;gap:var(--space-8);">
+            <div id="rm-pdf-container" class="rm-pdf-stage">
               <div style="padding:var(--space-8);color:var(--ink-muted);">Memuat lembar dokumen…</div>
             </div>
           </div>
@@ -310,12 +310,14 @@ export function ReaderPage({ container, params, query, router }) {
         pdfContainer.innerHTML = '';
         pdfContainer.appendChild(docxWrapper);
 
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
         await docx.renderAsync(arrayBuffer, docxWrapper, null, {
           className: 'docx',
           inWrapper: false,
           breakPages: true,
           ignoreWidth: true,
-          ignoreHeight: false,
+          ignoreHeight: isMobile,
           renderHeaders: true,
           renderFooters: true
         });
@@ -333,6 +335,17 @@ export function ReaderPage({ container, params, query, router }) {
           sec.classList.add('rm-pdf-page');
           sec.dataset.pageNo = pageNo;
           sec.id = `rm-page-${pageNo}`;
+
+          // Di mobile, paksa halaman Word fit 100% lebar layar dan hapus tinggi kosong berlebih
+          if (isMobile) {
+            sec.style.setProperty('width', '100%', 'important');
+            sec.style.setProperty('max-width', '100%', 'important');
+            sec.style.setProperty('min-width', '0px', 'important');
+            sec.style.setProperty('min-height', 'auto', 'important');
+            sec.style.setProperty('padding-left', '14px', 'important');
+            sec.style.setProperty('padding-right', '14px', 'important');
+            sec.style.setProperty('box-sizing', 'border-box', 'important');
+          }
 
           // Bungkus tabel dengan container scroll aman agar tidak meluber keluar layar
           sec.querySelectorAll('table').forEach(tbl => {

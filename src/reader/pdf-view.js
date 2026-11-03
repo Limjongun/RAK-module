@@ -56,7 +56,17 @@ export class PdfViewer {
 
   async renderPage(pageNo, pageWrapper, pageAnnotations = []) {
     const page = await this.pdfDoc.getPage(pageNo);
-    const viewport = page.getViewport({ scale: this.scale });
+
+    // Auto-fit skala responsif: Jika di mobile atau lebar container lebih sempit dari viewport
+    let effectiveScale = this.scale;
+    const containerWidth = (this.container && this.container.clientWidth) || (typeof window !== 'undefined' ? window.innerWidth : 800);
+    const unscaledViewport = page.getViewport({ scale: 1.0 });
+
+    if (containerWidth > 0 && containerWidth < unscaledViewport.width * this.scale) {
+      effectiveScale = Math.max(0.35, (containerWidth - 16) / unscaledViewport.width);
+    }
+
+    const viewport = page.getViewport({ scale: effectiveScale });
 
     pageWrapper.style.width = `${viewport.width}px`;
     pageWrapper.style.height = `${viewport.height}px`;
