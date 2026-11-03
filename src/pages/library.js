@@ -1,7 +1,7 @@
 // Rak Modul — Halaman Utama (Library / Shelf View)
 import { getAllLocalDocuments, getLocalProgress, getLocalAnnotations, saveLocalDocument, saveLocalPages, getDueLocalFlashcards, getAllTodos } from '../data/local-db.js';
 import { getSupabaseCredentials, saveSupabaseCredentials, isSupabaseConfigured } from '../data/supabase.js';
-import { fullSync, testSupabaseConnection, getSyncState } from '../data/sync.js';
+import { fullSync, testSupabaseConnection, getSyncState, checkD1Status } from '../data/sync.js';
 import { PdfViewer } from '../reader/pdf-view.js';
 import { showToast } from '../ui/toast.js';
 import { icon } from '../ui/icons.js';
@@ -211,57 +211,56 @@ export function LibraryPage({ container, router }) {
         }
       </main>
 
-      <!-- MODAL PENGATURAN SINKRONISASI SUPABASE CLOUD -->
+      <!-- MODAL PENGATURAN SINKRONISASI CLOUD -->
       <div id="rm-modal-cloud-sync" class="rm-modal-backdrop" style="display:none;">
         <div class="rm-modal" style="max-width:520px;">
           <div class="rm-modal-header">
             <div style="display:flex;align-items:center;gap:8px;">
               <span style="color:var(--pen);">${icon('cloud')}</span>
-              <h3 class="rm-modal-title" style="margin:0;">Sinkronisasi Supabase Cloud</h3>
+              <h3 class="rm-modal-title" style="margin:0;">Sinkronisasi Cloud Database</h3>
             </div>
             <button id="rm-btn-close-sync-modal" class="rm-colab-btn-icon">${icon('close')}</button>
           </div>
           <div class="rm-modal-body" style="display:flex;flex-direction:column;gap:var(--space-3);">
-            <div style="padding:10px 12px;background:var(--surface-sunken);border-radius:var(--radius-md);font-size:12.5px;line-height:1.5;">
+            <div style="padding:12px 14px;background:var(--surface-sunken);border-radius:var(--radius-md);font-size:12.5px;line-height:1.5;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                 <span style="font-weight:600;">Status Database:</span>
-                <span class="${isConfigured ? 'rm-badge rm-badge-green' : 'rm-badge'}" style="font-size:11px;">
-                  ${isConfigured ? '🟢 Terhubung ke Cloud' : '⚪ Mode Offline Lokal'}
+                <span id="rm-sync-status-badge" class="rm-badge rm-badge-green" style="font-size:11px;">
+                  Mengecek koneksi...
                 </span>
               </div>
-              <p style="margin:0;color:var(--ink-muted);font-size:12px;">
+              <p id="rm-sync-status-desc" style="margin:0;color:var(--ink-muted);font-size:12px;">
                 Sinkronkan seluruh modul, halaman, coretan stylus/stabilo, catatan, progres baca, to-do list, kode bank, dan flashcards antara HP &amp; Laptop secara otomatis.
               </p>
             </div>
 
-            <div>
-              <label style="font-size:12px;font-weight:600;color:var(--ink-muted);display:block;margin-bottom:4px;">Project URL Supabase</label>
-              <input id="rm-sync-url" type="url" class="rm-input" style="width:100%;font-family:monospace;font-size:12px;" placeholder="https://xxxxxxxx.supabase.co" value="${credentials.url || ''}" />
+            <!-- Tombol Cepat Sync Cloudflare D1 -->
+            <div id="rm-d1-action-box" style="display:none;padding:12px;background:var(--surface);border:1px solid var(--pen-soft);border-radius:var(--radius-md);text-align:center;">
+              <div style="font-size:13px;font-weight:600;margin-bottom:4px;color:var(--ink);">Database Cloudflare D1 Aktif (Gratis 5 GB)</div>
+              <div id="rm-d1-counts-info" style="font-size:12px;color:var(--ink-muted);margin-bottom:10px;">Semua data tersimpan otomatis di server edge Cloudflare.</div>
+              <button id="rm-btn-trigger-d1-sync" class="rm-btn rm-btn-primary" style="width:100%;font-size:13px;height:34px;">
+                ${icon('sync')} Sinkronkan Sekarang
+              </button>
             </div>
 
-            <div>
-              <label style="font-size:12px;font-weight:600;color:var(--ink-muted);display:block;margin-bottom:4px;">Anon Public Key Supabase</label>
-              <input id="rm-sync-key" type="password" class="rm-input" style="width:100%;font-family:monospace;font-size:12px;" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." value="${credentials.key || ''}" />
-            </div>
+            <details style="font-size:12px;color:var(--ink-muted);margin-top:4px;">
+              <summary style="cursor:pointer;font-weight:600;color:var(--pen);">Opsi Tambahan: Sambungkan Supabase</summary>
+              <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-top:8px;">
+                <div>
+                  <label style="font-size:11px;font-weight:600;color:var(--ink-muted);display:block;margin-bottom:3px;">Project URL Supabase</label>
+                  <input id="rm-sync-url" type="url" class="rm-input" style="width:100%;font-family:monospace;font-size:11.5px;" placeholder="https://xxxxxxxx.supabase.co" value="${credentials.url || ''}" />
+                </div>
+                <div>
+                  <label style="font-size:11px;font-weight:600;color:var(--ink-muted);display:block;margin-bottom:3px;">Anon Public Key Supabase</label>
+                  <input id="rm-sync-key" type="password" class="rm-input" style="width:100%;font-family:monospace;font-size:11.5px;" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." value="${credentials.key || ''}" />
+                </div>
+                <button id="rm-btn-save-test-sync" class="rm-btn rm-btn-ghost" style="font-size:12px;height:30px;align-self:flex-start;">
+                  ${icon('check')} Simpan Kredensial Supabase
+                </button>
+              </div>
+            </details>
 
             <div id="rm-sync-msg-box" style="display:none;padding:8px 12px;border-radius:var(--radius-md);font-size:12.5px;"></div>
-
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--line);flex-wrap:wrap;">
-              <button id="rm-btn-save-test-sync" class="rm-btn rm-btn-primary" style="font-size:12px;height:32px;">
-                ${icon('check')} Simpan &amp; Uji Koneksi
-              </button>
-
-              <div style="display:flex;gap:var(--space-2);align-items:center;">
-                ${isConfigured ? `
-                  <button id="rm-btn-trigger-sync" class="rm-btn rm-btn-ghost" style="font-size:12px;height:32px;color:var(--pen);">
-                    ${icon('sync')} Sinkronkan Sekarang
-                  </button>
-                  <button id="rm-btn-disconnect-sync" class="rm-btn rm-btn-ghost rm-danger" style="font-size:12px;height:32px;" title="Putuskan koneksi cloud dan kembali ke mode lokal">
-                    Putuskan
-                  </button>
-                ` : ''}
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -280,11 +279,66 @@ export function LibraryPage({ container, router }) {
     const syncMsgBox = container.querySelector('#rm-sync-msg-box');
     const urlInput = container.querySelector('#rm-sync-url');
     const keyInput = container.querySelector('#rm-sync-key');
+    const statusBadge = container.querySelector('#rm-sync-status-badge');
+    const statusDesc = container.querySelector('#rm-sync-status-desc');
+    const d1Box = container.querySelector('#rm-d1-action-box');
+    const d1TriggerBtn = container.querySelector('#rm-btn-trigger-d1-sync');
+    const d1CountsInfo = container.querySelector('#rm-d1-counts-info');
+
+    async function updateSyncUI() {
+      const d1 = await checkD1Status();
+      if (d1 && d1.ok) {
+        if (statusBadge) {
+          statusBadge.className = 'rm-badge rm-badge-green';
+          statusBadge.textContent = '🟢 Terhubung ke Cloudflare D1';
+        }
+        if (statusDesc) {
+          statusDesc.textContent = 'Database serverless SQL resmi Cloudflare aktif. Seluruh to-do, modul, catatan, dan kode disinkronkan otomatis antara HP & Laptop.';
+        }
+        if (d1Box) d1Box.style.display = 'block';
+        if (d1CountsInfo && d1.counts) {
+          d1CountsInfo.textContent = `Tersimpan di Cloud: ${d1.counts.todos || 0} to-do, ${d1.counts.documents || 0} modul, ${d1.counts.notebooks || 0} kode bank.`;
+        }
+        const navPill = container.querySelector('#rm-btn-cloud-sync span');
+        if (navPill) navPill.textContent = '🟢 Cloud (D1)';
+      } else if (isConfigured) {
+        if (statusBadge) {
+          statusBadge.className = 'rm-badge rm-badge-green';
+          statusBadge.textContent = '🟢 Terhubung ke Supabase';
+        }
+      } else {
+        if (statusBadge) {
+          statusBadge.className = 'rm-badge';
+          statusBadge.textContent = '⚪ Mode Offline Lokal';
+        }
+      }
+    }
+
+    // Cek koneksi di awal secara non-blocking
+    updateSyncUI();
 
     if (syncBtn && syncModal) {
       syncBtn.addEventListener('click', () => {
         syncModal.style.display = 'flex';
         if (syncMsgBox) syncMsgBox.style.display = 'none';
+        updateSyncUI();
+      });
+    }
+
+    if (d1TriggerBtn) {
+      d1TriggerBtn.addEventListener('click', async () => {
+        d1TriggerBtn.setAttribute('disabled', 'true');
+        d1TriggerBtn.textContent = 'Menyinkronkan...';
+        const res = await fullSync();
+        d1TriggerBtn.removeAttribute('disabled');
+        d1TriggerBtn.innerHTML = `${icon('sync')} Sinkronkan Sekarang`;
+        if (res.success) {
+          showToast('Sinkronisasi Cloudflare D1 berhasil!');
+          updateSyncUI();
+          render();
+        } else {
+          alert('Gagal sinkron: ' + (res.error || res.reason));
+        }
       });
     }
 

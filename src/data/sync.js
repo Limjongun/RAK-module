@@ -1,17 +1,19 @@
-// Two-Way Sync Engine between IndexedDB (Local-First) and Supabase (PostgreSQL Cloud)
+// Two-Way Sync Engine: Cloudflare D1 (Primary Serverless SQL) & Supabase (Optional)
 import { initLocalDB } from './local-db.js';
 import { supabase, isSupabaseConfigured } from './supabase.js';
 
 let isSyncing = false;
 let lastSyncTime = null;
 let lastSyncError = null;
+let d1Available = null; // null: belum diuji, true: aktif, false: tidak ada
 
 export function getSyncState() {
   return {
     isSyncing,
     lastSyncTime,
     lastSyncError,
-    isConfigured: isSupabaseConfigured()
+    d1Available: Boolean(d1Available),
+    isSupabaseConfigured: isSupabaseConfigured()
   };
 }
 
@@ -21,273 +23,185 @@ function notifySyncChange() {
   }
 }
 
-// 1. Menguras antrean perubahan offline (outbox queue)
+// -------------------------------------------------------------
+// 1. CLOUDFLARE D1 SYNC ENGINE
+// -------------------------------------------------------------
+
+export async function checkD1Status() {
+  try {
+    const res = await fetch('/api/db/status');
+    if (res.ok) {
+      const data = await res.json();
+      d1Available = Boolean(data.ok);
+      return data;
+    }
+  } catch (_) {}
+  d1Available = false;
+  return { ok: false };
+}
+
+export async function pushAllToD1() {
+  const db = await initLocalDB();
+  const payload = {
+    todos: [],
+    documents: [],
+    code_notebooks: [],
+    annotations: [],
+    reading_progress: [],
+    flashcards: [],
+    study_sessions: []
+  };
+
+  if (db.objectStoreNames.contains('todos')) {
+    payload.todos = await db.getAll('todos');
+  }
+  if (db.objectStoreNames.contains('documents')) {
+    const docs = await db.getAll('documents');
+    payload.documents = docs.map(d => {
+      const clean = { ...d };
+      delete clean._cachedBlob;
+      return clean;
+    });
+  }
+  if (db.objectStoreNames.contains('code_notebooks')) {
+    payload.code_notebooks = await db.getAll('code_notebooks');
+  }
+  if (db.objectStoreNames.contains('annotations')) {
+    payload.annotations = await db.getAll('annotations');
+  }
+  if (db.objectStoreNames.contains('reading_progress')) {
+    payload.reading_progress = await db.getAll('reading_progress');
+  }
+  if (db.objectStoreNames.contains('flashcards')) {
+    payload.flashcards = await db.getAll('flashcards');
+  }
+  if (db.objectStoreNames.contains('study_sessions')) {
+    payload.study_sessions = await db.getAll('study_sessions');
+  }
+
+  const res = await fetch('/api/db/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Gagal push data ke Cloudflare D1');
+  }
+
+  return res.json();
+}
+
+export async function pullAllFromD1() {
+  const res = await fetch('/api/db/pull');
+  if (!res.ok) {
+    throw new Error('Gagal pull data dari Cloudflare D1');
+  }
+
+  const data = await res.json();
+  const db = await initLocalDB();
+
+  // 1. Todos
+  if (Array.isArray(data.todos) && data.todos.length > 0) {
+    const tx = db.transaction('todos', 'readwrite');
+    for (const t of data.todos) {
+      await tx.store.put(t);
+    }
+    await tx.done;
+    try {
+      localStorage.setItem('rak_modul_todos_cache', JSON.stringify(data.todos));
+    } catch (_) {}
+  }
+
+  // 2. Documents
+  if (Array.isArray(data.documents) && data.documents.length > 0) {
+    const tx = db.transaction('documents', 'readwrite');
+    for (const d of data.documents) {
+      const existing = await tx.store.get(d.id);
+      await tx.store.put({ ...d, _cachedBlob: existing?._cachedBlob || null });
+    }
+    await tx.done;
+  }
+
+  // 3. Code Notebooks
+  if (Array.isArray(data.code_notebooks) && data.code_notebooks.length > 0) {
+    const tx = db.transaction('code_notebooks', 'readwrite');
+    for (const nb of data.code_notebooks) {
+      await tx.store.put(nb);
+    }
+    await tx.done;
+  }
+
+  // 4. Annotations
+  if (Array.isArray(data.annotations) && data.annotations.length > 0) {
+    const tx = db.transaction('annotations', 'readwrite');
+    for (const a of data.annotations) {
+      await tx.store.put(a);
+    }
+    await tx.done;
+  }
+
+  // 5. Reading Progress
+  if (Array.isArray(data.reading_progress) && data.reading_progress.length > 0) {
+    const tx = db.transaction('reading_progress', 'readwrite');
+    for (const p of data.reading_progress) {
+      await tx.store.put(p);
+    }
+    await tx.done;
+  }
+
+  // 6. Flashcards
+  if (Array.isArray(data.flashcards) && data.flashcards.length > 0) {
+    const tx = db.transaction('flashcards', 'readwrite');
+    for (const fc of data.flashcards) {
+      await tx.store.put(fc);
+    }
+    await tx.done;
+  }
+
+  return data;
+}
+
+// -------------------------------------------------------------
+// 2. SUPABASE SYNC ENGINE (OPSIONAL FALLBACK)
+// -------------------------------------------------------------
+
 export async function flushSyncQueue() {
   if (!isSupabaseConfigured() || isSyncing) return;
   if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
-  isSyncing = true;
-  lastSyncError = null;
-  notifySyncChange();
-
   try {
     const db = await initLocalDB();
-    if (!db.objectStoreNames.contains('sync_queue')) {
-      isSyncing = false;
-      notifySyncChange();
-      return;
-    }
+    if (!db.objectStoreNames.contains('sync_queue')) return;
 
     const queue = await db.getAll('sync_queue');
-    if (!queue || queue.length === 0) {
-      isSyncing = false;
-      notifySyncChange();
-      return;
-    }
+    if (!queue || queue.length === 0) return;
 
     for (const item of queue) {
       try {
         if (item.action === 'upsert') {
-          // Bersihkan file binary blob sebelum dikirim ke Supabase
           const payload = { ...item.data };
           delete payload._cachedBlob;
-
           const { error } = await supabase.from(item.table).upsert(payload);
-          if (!error) {
-            await db.delete('sync_queue', item.id);
-          } else {
-            console.warn(`Gagal sync item ${item.table}:`, error);
-          }
+          if (!error) await db.delete('sync_queue', item.id);
         } else if (item.action === 'delete') {
           const { error } = await supabase.from(item.table).delete().eq('id', item.id);
-          if (!error) {
-            await db.delete('sync_queue', item.id);
-          }
+          if (!error) await db.delete('sync_queue', item.id);
         }
       } catch (err) {
         console.warn('Sync queue error:', item, err);
       }
     }
-
-    lastSyncTime = new Date().toISOString();
   } catch (err) {
-    lastSyncError = err.message;
     console.error('Flush sync queue error:', err);
-  } finally {
-    isSyncing = false;
-    notifySyncChange();
   }
 }
 
-// 2. Mendorong seluruh data lokal yang ada ke Supabase (Initial / Manual Push)
-export async function pushAllLocalData() {
-  if (!isSupabaseConfigured()) {
-    throw new Error('Supabase belum dikonfigurasi. Masukkan URL & Anon Key terlebih dahulu.');
-  }
+// -------------------------------------------------------------
+// 3. FULL TWO-WAY SYNC (Prioritas: D1 -> Supabase)
+// -------------------------------------------------------------
 
-  isSyncing = true;
-  notifySyncChange();
-
-  try {
-    const db = await initLocalDB();
-
-    // 1. Documents (tanpa blob biner)
-    if (db.objectStoreNames.contains('documents')) {
-      const docs = await db.getAll('documents');
-      if (docs.length > 0) {
-        const cleanDocs = docs.map(d => {
-          const c = { ...d };
-          delete c._cachedBlob;
-          return c;
-        });
-        await supabase.from('documents').upsert(cleanDocs);
-      }
-    }
-
-    // 2. Pages Text
-    if (db.objectStoreNames.contains('pages')) {
-      const pages = await db.getAll('pages');
-      if (pages.length > 0) {
-        // Chunk per 100 pages agar aman dari batasan ukuran payload Supabase
-        for (let i = 0; i < pages.length; i += 100) {
-          await supabase.from('pages').upsert(pages.slice(i, i + 100));
-        }
-      }
-    }
-
-    // 3. Annotations
-    if (db.objectStoreNames.contains('annotations')) {
-      const annots = await db.getAll('annotations');
-      if (annots.length > 0) {
-        await supabase.from('annotations').upsert(annots);
-      }
-    }
-
-    // 4. Reading Progress
-    if (db.objectStoreNames.contains('reading_progress')) {
-      const progresses = await db.getAll('reading_progress');
-      if (progresses.length > 0) {
-        await supabase.from('reading_progress').upsert(progresses);
-      }
-    }
-
-    // 5. Todos (Agenda Belajar)
-    if (db.objectStoreNames.contains('todos')) {
-      const todos = await db.getAll('todos');
-      if (todos.length > 0) {
-        await supabase.from('todos').upsert(todos);
-      }
-    }
-
-    // 6. Code Notebooks (Kode Bank)
-    if (db.objectStoreNames.contains('code_notebooks')) {
-      const notebooks = await db.getAll('code_notebooks');
-      if (notebooks.length > 0) {
-        await supabase.from('code_notebooks').upsert(notebooks);
-      }
-    }
-
-    // 7. Flashcards
-    if (db.objectStoreNames.contains('flashcards')) {
-      const cards = await db.getAll('flashcards');
-      if (cards.length > 0) {
-        await supabase.from('flashcards').upsert(cards);
-      }
-    }
-
-    // 8. Study Sessions
-    if (db.objectStoreNames.contains('study_sessions')) {
-      const sessions = await db.getAll('study_sessions');
-      if (sessions.length > 0) {
-        await supabase.from('study_sessions').upsert(sessions);
-      }
-    }
-
-    lastSyncTime = new Date().toISOString();
-  } catch (err) {
-    lastSyncError = err.message;
-    console.error('pushAllLocalData error:', err);
-    throw err;
-  } finally {
-    isSyncing = false;
-    notifySyncChange();
-  }
-}
-
-// 3. Menarik seluruh data dari Supabase ke IndexedDB Lokal (Pull from Cloud)
-export async function pullAllRemoteData() {
-  if (!isSupabaseConfigured()) {
-    throw new Error('Supabase belum dikonfigurasi.');
-  }
-
-  isSyncing = true;
-  notifySyncChange();
-
-  try {
-    const db = await initLocalDB();
-
-    // 1. Documents
-    const { data: remoteDocs } = await supabase.from('documents').select('*');
-    if (remoteDocs && remoteDocs.length > 0) {
-      const tx = db.transaction('documents', 'readwrite');
-      for (const doc of remoteDocs) {
-        const existing = await tx.store.get(doc.id);
-        // Pertahankan _cachedBlob lokal jika ada
-        const merged = { ...doc, _cachedBlob: existing?._cachedBlob || null };
-        await tx.store.put(merged);
-      }
-      await tx.done;
-    }
-
-    // 2. Annotations
-    const { data: remoteAnnots } = await supabase.from('annotations').select('*');
-    if (remoteAnnots && remoteAnnots.length > 0) {
-      const tx = db.transaction('annotations', 'readwrite');
-      for (const a of remoteAnnots) {
-        await tx.store.put(a);
-      }
-      await tx.done;
-    }
-
-    // 3. Reading Progress
-    const { data: remoteProgress } = await supabase.from('reading_progress').select('*');
-    if (remoteProgress && remoteProgress.length > 0) {
-      const tx = db.transaction('reading_progress', 'readwrite');
-      for (const p of remoteProgress) {
-        await tx.store.put(p);
-      }
-      await tx.done;
-    }
-
-    // 4. Todos
-    const { data: remoteTodos } = await supabase.from('todos').select('*');
-    if (remoteTodos && remoteTodos.length > 0) {
-      const tx = db.transaction('todos', 'readwrite');
-      for (const t of remoteTodos) {
-        await tx.store.put(t);
-      }
-      await tx.done;
-      // Perbarui juga cache localStorage untuk ketahanan instan
-      try {
-        localStorage.setItem('rak_modul_todos_cache', JSON.stringify(remoteTodos));
-      } catch (_) {}
-    }
-
-    // 5. Code Notebooks
-    const { data: remoteNotebooks } = await supabase.from('code_notebooks').select('*');
-    if (remoteNotebooks && remoteNotebooks.length > 0) {
-      const tx = db.transaction('code_notebooks', 'readwrite');
-      for (const nb of remoteNotebooks) {
-        await tx.store.put(nb);
-      }
-      await tx.done;
-    }
-
-    // 6. Flashcards
-    const { data: remoteCards } = await supabase.from('flashcards').select('*');
-    if (remoteCards && remoteCards.length > 0) {
-      const tx = db.transaction('flashcards', 'readwrite');
-      for (const fc of remoteCards) {
-        await tx.store.put(fc);
-      }
-      await tx.done;
-    }
-
-    // 7. Study Sessions
-    const { data: remoteSessions } = await supabase.from('study_sessions').select('*');
-    if (remoteSessions && remoteSessions.length > 0) {
-      const tx = db.transaction('study_sessions', 'readwrite');
-      for (const s of remoteSessions) {
-        await tx.store.put(s);
-      }
-      await tx.done;
-    }
-
-    lastSyncTime = new Date().toISOString();
-  } catch (err) {
-    lastSyncError = err.message;
-    console.error('pullAllRemoteData error:', err);
-    throw err;
-  } finally {
-    isSyncing = false;
-    notifySyncChange();
-  }
-}
-
-// 4. Sinkronisasi Penuh Dua Arah (Full Two-Way Sync)
-export async function fullSync() {
-  if (!isSupabaseConfigured()) return { success: false, reason: 'unconfigured' };
-  try {
-    await flushSyncQueue();
-    await pushAllLocalData();
-    await pullAllRemoteData();
-    return { success: true, time: lastSyncTime };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
-}
-
-// 5. Uji Koneksi ke Supabase
 export async function testSupabaseConnection() {
   if (!isSupabaseConfigured()) {
     return { ok: false, message: 'URL atau Anon Key Supabase belum diisi.' };
@@ -303,9 +217,56 @@ export async function testSupabaseConnection() {
   }
 }
 
-// Pasang listener online otomatis
+export async function fullSync() {
+  if (isSyncing) return { success: false, reason: 'already_syncing' };
+  isSyncing = true;
+  lastSyncError = null;
+  notifySyncChange();
+
+  try {
+    // 1. Cek Cloudflare D1 terlebih dahulu
+    const status = await checkD1Status();
+    if (status && status.ok) {
+      await pushAllToD1();
+      await pullAllFromD1();
+      lastSyncTime = new Date().toISOString();
+      isSyncing = false;
+      notifySyncChange();
+      return { success: true, target: 'Cloudflare D1 (rakmodule)', time: lastSyncTime };
+    }
+
+    // 2. Jika D1 belum aktif, gunakan Supabase jika dikonfigurasi
+    if (isSupabaseConfigured()) {
+      await flushSyncQueue();
+      lastSyncTime = new Date().toISOString();
+      isSyncing = false;
+      notifySyncChange();
+      return { success: true, target: 'Supabase', time: lastSyncTime };
+    }
+
+    isSyncing = false;
+    notifySyncChange();
+    return { success: false, reason: 'unconfigured' };
+  } catch (err) {
+    lastSyncError = err.message;
+    isSyncing = false;
+    notifySyncChange();
+    return { success: false, error: err.message };
+  }
+}
+
+// -------------------------------------------------------------
+// AUTO-SYNC ON INITIAL LOAD & NETWORK ONLINE
+// -------------------------------------------------------------
+
 if (typeof window !== 'undefined') {
+  // Sync otomatis saat web dibuka
+  setTimeout(() => {
+    fullSync().catch(err => console.log('Auto initial sync note:', err));
+  }, 2000);
+
+  // Sync saat koneksi internet kembali online
   window.addEventListener('online', () => {
-    fullSync().catch(err => console.warn('Auto-sync on online failed:', err));
+    fullSync().catch(err => console.log('Auto online sync note:', err));
   });
 }

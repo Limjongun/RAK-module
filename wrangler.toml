@@ -9,14 +9,15 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = ["/api/*"]
 
+# Cloudflare D1 Serverless SQL Database (100% Gratis 5 GB)
+[[d1_databases]]
+binding = "DB"
+database_name = "rakmodule"
+database_id = "16f56c82-a999-465d-8bca-ff4ccc79e0cd"
+
 [vars]
 SUPABASE_URL = "https://your-project.supabase.co"
 
-# Cloudflare R2 Bucket Binding (Opsional: Aktifkan jika Anda membuat bucket 'rak-modul-storage' di menu R2 Dashboard)
-# [[r2_buckets]]
-# binding = "BUCKET"
-# bucket_name = "rak-modul-storage"
-
-# Cron trigger: Berjalan tiap 3 hari pukul 00:00 UTC untuk mencegah jeda Supabase free tier
+# Cron trigger: Berjalan tiap 3 hari pukul 00:00 UTC
 [triggers]
 crons = ["0 0 */3 * *"]
