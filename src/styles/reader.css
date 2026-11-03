@@ -1,0 +1,419 @@
+/* Reader Specific Layout & Overlays */
+
+.rm-reader-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.rm-reader-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 var(--space-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.rm-reader-header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.rm-reader-title {
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+
+.rm-reader-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Viewport Area */
+.rm-reader-viewport {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  padding: var(--space-6) var(--space-3) 85px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  position: relative;
+  scroll-behavior: smooth;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* Single PDF Page Container */
+.rm-pdf-page {
+  position: relative;
+  background: var(--sheet);
+  border-radius: var(--radius-sheet);
+  box-shadow: var(--shadow-sheet);
+  margin: 0 auto;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Word Document Container (.docx) */
+.rm-docx-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.rm-docx-container section.docx {
+  background: var(--sheet) !important;
+  color: var(--ink) !important;
+  box-shadow: var(--shadow-sheet) !important;
+  border-radius: var(--radius-sheet) !important;
+  margin: 0 auto !important;
+  position: relative !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 820px !important;
+  min-width: 0 !important;
+  padding-left: clamp(16px, 5vw, 64px) !important;
+  padding-right: clamp(16px, 5vw, 64px) !important;
+  padding-top: clamp(24px, 5vw, 64px) !important;
+  padding-bottom: clamp(24px, 5vw, 64px) !important;
+  overflow-wrap: break-word !important;
+  word-wrap: break-word !important;
+}
+
+/* Wadah scroll horizontal aman untuk tabel lebar */
+.rm-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: var(--space-3) 0;
+  padding-bottom: 2px;
+}
+
+.rm-docx-container table {
+  border-collapse: collapse;
+  max-width: 100%;
+}
+
+.rm-docx-container table td,
+.rm-docx-container table th {
+  border: 1px solid var(--line-strong) !important;
+}
+
+.rm-docx-container img {
+  max-width: 100%;
+  height: auto;
+}
+
+.rm-pdf-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Text Layer (pdfjs) */
+.rm-pdf-page .textLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1.0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.rm-pdf-page .textLayer span,
+.rm-pdf-page .textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.rm-pdf-page .textLayer ::selection {
+  background: var(--pen-soft);
+  color: var(--ink);
+}
+
+/* SVG Annotation Layer */
+.rm-pdf-page .rm-annot-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.rm-pdf-page .rm-annot-layer * {
+  pointer-events: auto;
+}
+
+/* Floating Toolbar */
+.rm-floating-toolbar {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: calc(100vw - 24px);
+}
+
+/* Floating TTS Player */
+.rm-floating-player {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 92%;
+  max-width: 640px;
+  z-index: 35;
+}
+
+/* Side Drawer (TOC / Notes / AI) */
+.rm-reader-sidebar {
+  width: 320px;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  z-index: 25;
+  transition: transform 160ms ease-out;
+}
+
+.rm-reader-sidebar.collapsed {
+  display: none;
+}
+
+.rm-sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+}
+
+.rm-sidebar-tab {
+  flex: 1;
+  height: 40px;
+  border: 0;
+  background: transparent;
+  font: 500 13px/18px var(--font-ui);
+  color: var(--ink-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.rm-sidebar-tab.active {
+  color: var(--pen);
+  border-bottom-color: var(--pen);
+}
+
+.rm-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+
+/* Selection Popover */
+.rm-selection-menu {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-float);
+  z-index: 50;
+}
+
+/* ========================================================
+   RESPONSIVE READER (TABLET & SMARTPHONE / MOBILE)
+   ======================================================== */
+
+@media (max-width: 768px) {
+  /* Header Reader pada HP: Sederhana & Muat Tanpa Overflow */
+  .rm-reader-header {
+    height: 48px;
+    padding: 0 var(--space-2);
+    gap: var(--space-2);
+  }
+
+  .rm-reader-header-left {
+    gap: var(--space-1);
+    min-width: 0;
+    flex: 1;
+  }
+
+  .rm-reader-title {
+    max-width: 120px;
+    font-size: 13px;
+  }
+
+  #rm-page-indicator {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  /* Sembunyikan tombol zoom manual di HP karena pengguna memakai cubit-layar (pinch to zoom) */
+  #rm-btn-zoom-in,
+  #rm-btn-zoom-out,
+  #rm-zoom-val {
+    display: none !important;
+  }
+
+  /* Widget Pomodoro kompak di mobile */
+  .rm-pomo-widget {
+    padding: 1px 6px !important;
+    gap: 4px !important;
+  }
+
+  #rm-pomo-time {
+    font-size: 11px !important;
+  }
+
+  /* Bilah Sisi (Catatan / Daftar Isi) meluncur sebagai Sheet Melayang di atas dokumen */
+  .rm-reader-sidebar {
+    position: fixed;
+    top: 48px;
+    right: 0;
+    bottom: 0;
+    width: min(85vw, 320px);
+    z-index: 50;
+    box-shadow: var(--shadow-float);
+    border-left: 1px solid var(--line);
+  }
+
+  .rm-reader-viewport {
+    padding: var(--space-3) var(--space-1);
+    gap: var(--space-4);
+    width: 100%;
+  }
+
+  /* Kanvas PDF fleksibel sesuai lebar HP */
+  .rm-pdf-page {
+    max-width: 100% !important;
+    border-radius: var(--radius-sm);
+  }
+
+  .rm-pdf-canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Dokumen Word DOCX responsif di layar kecil */
+  .rm-docx-container {
+    width: 100% !important;
+    padding: 0 var(--space-1) !important;
+  }
+
+  .rm-docx-container section.docx {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: var(--space-4) var(--space-3) !important;
+    margin: 0 auto var(--space-3) !important;
+    box-sizing: border-box !important;
+    border-radius: var(--radius-sm) !important;
+  }
+
+  /* Tabel di dalam dokumen dapat digeser horisontal secara aman tanpa merusak layout */
+  .rm-docx-container table {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .rm-docx-container img {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Pemutar TTS mengambang di bawah pas dengan lebar smartphone */
+  .rm-floating-player {
+    width: calc(100vw - 12px);
+    bottom: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .rm-player-meta {
+    max-width: 110px;
+    margin: 0 var(--space-1);
+  }
+
+  .rm-player-meta b {
+    font-size: 11px;
+    max-width: 110px;
+  }
+
+  .rm-player-meta span {
+    font-size: 10px;
+  }
+
+  .rm-player-center-btns {
+    gap: 1px;
+  }
+
+  .rm-player-btn-seek {
+    padding: 0 4px;
+    font-size: 10px;
+  }
+
+  .rm-player-right-btns .rm-tts-voice-btn {
+    display: none;
+  }
+
+  /* Toolbar anotasi melayang di mobile */
+  .rm-floating-toolbar {
+    max-width: calc(100vw - 12px);
+    padding: 2px 4px;
+    gap: 2px;
+    bottom: var(--space-3);
+  }
+
+  .rm-floating-toolbar .rm-tool {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .rm-floating-toolbar .rm-swatch {
+    width: 16px;
+    height: 16px;
+    margin: 0 2px;
+    flex-shrink: 0;
+  }
+
+  .rm-floating-toolbar .rm-sep {
+    margin: 2px 2px;
+  }
+}
+
+

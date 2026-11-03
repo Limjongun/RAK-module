@@ -1,0 +1,16 @@
+name = "rak-modul-worker"
+main = "worker/index.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+SUPABASE_URL = "https://your-project.supabase.co"
+
+# Cloudflare R2 Bucket Binding
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "rak-modul-storage"
+
+# Cron trigger: Berjalan tiap 3 hari pukul 00:00 UTC untuk mencegah jeda Supabase free tier
+[triggers]
+crons = ["0 0 */3 * *"]
+

@@ -1,0 +1,13 @@
+Struktur Data dan Algoritma: Pemrograman Dinamis (Dynamic Programming)
+
+Pemrograman dinamis adalah teknik perancangan algoritma yang memecahkan masalah kompleks dengan membaginya menjadi sub-masalah yang tumpang tindih (overlapping subproblems) dan memiliki sifat substruktur optimal (optimal substructure).
+
+Karakteristik Utama:
+1. Overlapping Subproblems: Masalah yang sama diselesaikan berulang kali. Solusinya disimpan dalam tabel memoization atau tabel tabular.
+2. Optimal Substructure: Solusi optimal dari masalah utama dapat dibentuk dari solusi optimal sub-masalahnya.
+
+Contoh Masalah Klasik:
+- Deret Fibonacci: Mengurangi kompleksitas dari O(2^n) menjadi O(n).
+- 0/1 Knapsack Problem: Memilih barang bernilai maksimal dengan batas kapasitas tas.
+- Longest Common Subsequence (LCS): Menemukan kecocokan substring terpanjang.
+
