@@ -2,6 +2,7 @@
 import { getAllLocalDocuments, getLocalProgress, getLocalAnnotations, saveLocalDocument, saveLocalPages, getDueLocalFlashcards, getAllTodos } from '../data/local-db.js';
 import { getSupabaseCredentials, saveSupabaseCredentials, isSupabaseConfigured } from '../data/supabase.js';
 import { fullSync, testSupabaseConnection, getSyncState, checkD1Status } from '../data/sync.js';
+import { uploadFileToCloud } from '../data/cloud-db.js';
 import { PdfViewer } from '../reader/pdf-view.js';
 import { showToast } from '../ui/toast.js';
 import { icon } from '../ui/icons.js';
@@ -37,6 +38,22 @@ export function LibraryPage({ container, router }) {
     const docs = await getAllLocalDocuments();
     // Urutkan berdasarkan waktu pembaruan
     docs.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+
+    // Auto-backfill file lokal ke Cloud D1 di latar belakang jika belum ada di cloud
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      docs.forEach(doc => {
+        if (doc._cachedBlob instanceof Blob) {
+          fetch(`/api/db/file/${doc.id}/status`)
+            .then(r => r.json())
+            .then(st => {
+              if (!st.exists || !st.uploaded_chunks) {
+                uploadFileToCloud(doc.id, doc._cachedBlob, doc.title, doc.source_type);
+              }
+            })
+            .catch(() => {});
+        }
+      });
+    }
 
     // Ambil progress dan anotasi untuk tiap dokumen
     const enriched = await Promise.all(

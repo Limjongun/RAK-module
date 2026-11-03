@@ -115,6 +115,24 @@ async function ensureTables(db) {
         started_at TEXT,
         created_at TEXT
       )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS document_files (
+        document_id TEXT,
+        chunk_index INTEGER,
+        chunk_data TEXT,
+        PRIMARY KEY (document_id, chunk_index)
+      )
+    `),
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS document_file_meta (
+        document_id TEXT PRIMARY KEY,
+        file_name TEXT,
+        mime_type TEXT,
+        file_size INTEGER,
+        total_chunks INTEGER,
+        updated_at TEXT
+      )
     `)
   ]);
 }
@@ -340,11 +358,44 @@ export default {
             }
           }
 
+          // Study Sessions
+          if (Array.isArray(body.study_sessions)) {
+            for (const s of body.study_sessions) {
+              statements.push(env.DB.prepare(`
+                INSERT INTO study_sessions (user_id, document_id, minutes, pages_read, started_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+              `).bind(
+                s.user_id || 'default_user', s.document_id || null,
+                Number(s.minutes) || 25, Number(s.pages_read) || 0,
+                s.started_at || new Date().toISOString(),
+                s.created_at || new Date().toISOString()
+              ));
+            }
+          }
+
+          // Extracted Pages Text
+          if (Array.isArray(body.pages)) {
+            for (const p of body.pages) {
+              statements.push(env.DB.prepare(`
+                INSERT INTO pages (document_id, page_no, text)
+                VALUES (?, ?, ?)
+                ON CONFLICT(document_id, page_no) DO UPDATE SET text = excluded.text
+              `).bind(p.document_id, Number(p.page_no), p.text || ''));
+            }
+          }
+
           // Deletions
           if (Array.isArray(body.deletions)) {
             for (const del of body.deletions) {
               if (['documents', 'todos', 'code_notebooks', 'flashcards', 'annotations'].includes(del.table)) {
                 statements.push(env.DB.prepare(`DELETE FROM ${del.table} WHERE id = ?`).bind(del.id));
+                if (del.table === 'documents') {
+                  statements.push(env.DB.prepare('DELETE FROM document_files WHERE document_id = ?').bind(del.id));
+                  statements.push(env.DB.prepare('DELETE FROM document_file_meta WHERE document_id = ?').bind(del.id));
+                  statements.push(env.DB.prepare('DELETE FROM pages WHERE document_id = ?').bind(del.id));
+                  statements.push(env.DB.prepare('DELETE FROM reading_progress WHERE document_id = ?').bind(del.id));
+                  statements.push(env.DB.prepare('DELETE FROM annotations WHERE document_id = ?').bind(del.id));
+                }
               }
             }
           }
@@ -410,6 +461,127 @@ export default {
             status: 500,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           });
+        }
+      }
+
+      // 2d. POST /api/db/file/chunk (Upload file chunk ke Cloudflare D1)
+      if (url.pathname === '/api/db/file/chunk' && request.method === 'POST') {
+        try {
+          const body = await request.json();
+          const { document_id, chunk_index, total_chunks, chunk_data, file_name, mime_type, file_size } = body;
+
+          if (!document_id || chunk_index === undefined || !chunk_data) {
+            return new Response(JSON.stringify({ error: 'Parameter chunk tidak lengkap' }), {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
+
+          // Simpan potongan chunk
+          await env.DB.prepare(`
+            INSERT INTO document_files (document_id, chunk_index, chunk_data)
+            VALUES (?, ?, ?)
+            ON CONFLICT(document_id, chunk_index) DO UPDATE SET chunk_data = excluded.chunk_data
+          `).bind(document_id, Number(chunk_index), chunk_data).run();
+
+          // Simpan metadata berkas
+          await env.DB.prepare(`
+            INSERT INTO document_file_meta (document_id, file_name, mime_type, file_size, total_chunks, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(document_id) DO UPDATE SET
+              file_name=excluded.file_name,
+              mime_type=excluded.mime_type,
+              file_size=excluded.file_size,
+              total_chunks=excluded.total_chunks,
+              updated_at=excluded.updated_at
+          `).bind(
+            document_id, file_name || 'document',
+            mime_type || 'application/octet-stream',
+            Number(file_size) || 0,
+            Number(total_chunks) || 1,
+            new Date().toISOString()
+          ).run();
+
+          return new Response(JSON.stringify({ success: true, chunk_index, total_chunks }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          console.error('File chunk upload error:', e);
+          return new Response(JSON.stringify({ error: e.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      // 2e. GET /api/db/file/:id/status (Periksa status ketersediaan file di Cloud D1)
+      if (url.pathname.startsWith('/api/db/file/') && url.pathname.endsWith('/status') && request.method === 'GET') {
+        try {
+          const parts = url.pathname.split('/');
+          const docId = parts[4]; // /api/db/file/:id/status
+          const meta = await env.DB.prepare('SELECT * FROM document_file_meta WHERE document_id = ?').bind(docId).first();
+          const count = await env.DB.prepare('SELECT count(*) as c FROM document_files WHERE document_id = ?').bind(docId).first();
+
+          return new Response(JSON.stringify({
+            exists: Boolean(meta),
+            meta: meta || null,
+            uploaded_chunks: count?.c || 0
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          return new Response(JSON.stringify({ error: e.message }), {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      // 2f. GET /api/db/file/:id (Unduh binary file langsung dari Cloudflare D1)
+      if (url.pathname.startsWith('/api/db/file/') && request.method === 'GET') {
+        const parts = url.pathname.split('/');
+        const docId = parts[4]; // /api/db/file/{id}
+
+        if (docId && docId !== 'chunk' && !docId.includes('status')) {
+          try {
+            const meta = await env.DB.prepare('SELECT * FROM document_file_meta WHERE document_id = ?').bind(docId).first();
+            const chunks = await env.DB.prepare('SELECT chunk_data FROM document_files WHERE document_id = ? ORDER BY chunk_index ASC').bind(docId).all();
+
+            if (!chunks.results || chunks.results.length === 0) {
+              return new Response(JSON.stringify({ error: 'Berkas tidak ditemukan di Cloud D1' }), {
+                status: 404,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+              });
+            }
+
+            // Gabungkan potongan base64 dan dekode ke binary
+            const totalBase64 = chunks.results.map(c => c.chunk_data).join('');
+            const binaryString = atob(totalBase64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            const mimeType = (meta && meta.mime_type) || 'application/octet-stream';
+            const fileName = (meta && meta.file_name) || `dokumen-${docId}`;
+
+            return new Response(bytes.buffer, {
+              headers: {
+                ...corsHeaders,
+                'Content-Type': mimeType,
+                'Content-Length': String(bytes.length),
+                'Content-Disposition': `inline; filename="${encodeURIComponent(fileName)}"`,
+                'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'
+              }
+            });
+          } catch (e) {
+            console.error('File download error:', e);
+            return new Response(JSON.stringify({ error: e.message }), {
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+            });
+          }
         }
       }
     }

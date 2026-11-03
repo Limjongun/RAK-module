@@ -1,5 +1,6 @@
 // IndexedDB Storage Layer using 'idb'
 import { openDB } from 'idb';
+import { uploadFileToCloud, downloadFileFromCloud, dispatchCloudSync, syncFromCloudToLocal } from './cloud-db.js';
 
 const DB_NAME = 'rak-modul-db';
 const DB_VERSION = 4;
@@ -115,6 +116,15 @@ export async function saveLocalDocument(doc, pdfBlob = null) {
   }
   await db.put('documents', item);
   await addToSyncQueue('documents', 'upsert', item);
+
+  // Full Cloud: Kirim metadata & berkas langsung ke Cloudflare D1
+  dispatchCloudSync('documents', 'upsert', item);
+  if (pdfBlob && typeof window !== 'undefined') {
+    uploadFileToCloud(item.id, pdfBlob, item.title, item.source_type).catch(err => {
+      console.warn('Background upload file ke Cloud D1 note:', err);
+    });
+  }
+
   return item;
 }
 
@@ -122,6 +132,8 @@ export async function deleteLocalDocument(id) {
   const db = await initLocalDB();
   await db.delete('documents', id);
   await addToSyncQueue('documents', 'delete', id);
+  // Full Cloud: Hapus dari Cloudflare D1
+  dispatchCloudSync('documents', 'delete', id);
 }
 
 export async function getLocalDocument(id) {
@@ -131,6 +143,10 @@ export async function getLocalDocument(id) {
 
 export async function getAllLocalDocuments() {
   const db = await initLocalDB();
+  // Full Cloud: Tarik pembaruan dokumen dari Cloudflare D1
+  try {
+    await syncFromCloudToLocal();
+  } catch (_) {}
   return db.getAll('documents');
 }
 
@@ -141,6 +157,10 @@ export async function saveLocalPages(pages) {
     await tx.store.put(page);
   }
   await tx.done;
+  // Full Cloud: Simpan teks halaman ke Cloud D1 untuk pencarian & TTS
+  if (pages && pages.length > 0) {
+    dispatchCloudSync('pages', 'upsert', pages);
+  }
 }
 
 export async function getLocalPages(documentId) {
@@ -160,6 +180,8 @@ export async function saveLocalAnnotation(annotation) {
     data: annotation,
     created_at: new Date().toISOString()
   });
+  // Full Cloud: Kirim ke Cloud D1
+  dispatchCloudSync('annotations', 'upsert', annotation);
   return annotation;
 }
 
@@ -183,6 +205,8 @@ export async function deleteLocalAnnotation(id) {
       id,
       created_at: new Date().toISOString()
     });
+    // Full Cloud: Hapus dari Cloud D1
+    dispatchCloudSync('annotations', 'delete', id);
   }
 }
 
@@ -196,6 +220,8 @@ export async function saveLocalProgress(progress) {
     data: progress,
     created_at: new Date().toISOString()
   });
+  // Full Cloud: Kirim progress baca ke Cloud D1
+  dispatchCloudSync('reading_progress', 'upsert', progress);
 }
 
 export async function getLocalProgress(documentId) {
@@ -223,11 +249,16 @@ export async function saveLocalFlashcard(card) {
   };
   await db.put('flashcards', item);
   await addToSyncQueue('flashcards', 'upsert', item);
+  // Full Cloud: Kirim flashcard ke Cloud D1
+  dispatchCloudSync('flashcards', 'upsert', item);
   return item;
 }
 
 export async function getAllLocalFlashcards() {
   const db = await initLocalDB();
+  try {
+    await syncFromCloudToLocal();
+  } catch (_) {}
   return db.getAll('flashcards');
 }
 
@@ -241,6 +272,8 @@ export async function deleteLocalFlashcard(id) {
   const db = await initLocalDB();
   await db.delete('flashcards', id);
   await addToSyncQueue('flashcards', 'delete', id);
+  // Full Cloud: Hapus dari Cloud D1
+  dispatchCloudSync('flashcards', 'delete', id);
 }
 
 // Study Sessions (Pomodoro & Reading Time Tracking)
@@ -256,6 +289,8 @@ export async function recordStudySession(session) {
   const id = await db.add('study_sessions', item);
   const fullItem = { id, ...item };
   await addToSyncQueue('study_sessions', 'upsert', fullItem);
+  // Full Cloud: Kirim sesi belajar ke Cloud D1
+  dispatchCloudSync('study_sessions', 'upsert', fullItem);
   return fullItem;
 }
 
@@ -347,6 +382,10 @@ export async function getStudyStats() {
 
 export async function getAllCodeNotebooks() {
   const db = await initLocalDB();
+  // Full Cloud: Tarik pembaruan kode dari Cloudflare D1
+  try {
+    await syncFromCloudToLocal();
+  } catch (_) {}
   const list = await db.getAll('code_notebooks');
   return list.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
 }
@@ -366,6 +405,8 @@ export async function saveCodeNotebook(notebook) {
   };
   await db.put('code_notebooks', item);
   await addToSyncQueue('code_notebooks', 'upsert', item);
+  // Full Cloud: Simpan ke Cloud D1
+  dispatchCloudSync('code_notebooks', 'upsert', item);
   return item;
 }
 
@@ -373,6 +414,8 @@ export async function deleteCodeNotebook(id) {
   const db = await initLocalDB();
   await db.delete('code_notebooks', id);
   await addToSyncQueue('code_notebooks', 'delete', id);
+  // Full Cloud: Hapus dari Cloud D1
+  dispatchCloudSync('code_notebooks', 'delete', id);
 }
 
 export async function seedSampleCodeNotebooksIfEmpty() {
@@ -476,6 +519,10 @@ export async function getAllTodos() {
     if (!db.objectStoreNames.contains('todos')) {
       return [];
     }
+    // Full Cloud: Tarik to-do terbaru dari Cloud D1
+    try {
+      await syncFromCloudToLocal();
+    } catch (_) {}
     const list = await db.getAll('todos');
     return list.sort((a, b) => {
       // Tugas yang belum selesai di atas
@@ -519,6 +566,8 @@ export async function saveTodo(todo) {
     };
     await db.put('todos', item);
     await addToSyncQueue('todos', 'upsert', item);
+    // Full Cloud: Kirim ke Cloud D1
+    dispatchCloudSync('todos', 'upsert', item);
     return item;
   } catch (err) {
     console.warn('saveTodo error:', err);
@@ -532,6 +581,8 @@ export async function deleteTodo(id) {
     if (db.objectStoreNames.contains('todos')) {
       await db.delete('todos', id);
       await addToSyncQueue('todos', 'delete', id);
+      // Full Cloud: Hapus dari Cloud D1
+      dispatchCloudSync('todos', 'delete', id);
     }
   } catch (err) {
     console.warn('deleteTodo error:', err);
@@ -549,6 +600,8 @@ export async function toggleTodoComplete(id) {
     item.updated_at = new Date().toISOString();
     await db.put('todos', item);
     await addToSyncQueue('todos', 'upsert', item);
+    // Full Cloud: Kirim ke Cloud D1
+    dispatchCloudSync('todos', 'upsert', item);
     return item;
   } catch (err) {
     console.warn('toggleTodoComplete error:', err);

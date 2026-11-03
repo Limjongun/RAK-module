@@ -10,6 +10,7 @@ import { exportNotesToMarkdown, exportAnnotatedPdf } from '../reader/exporter.js
 import { processFileToCanonicalPdf } from '../reader/format-converter.js';
 import {
   getLocalDocument,
+  saveLocalDocument,
   getLocalAnnotations,
   saveLocalAnnotation,
   deleteLocalAnnotation,
@@ -17,6 +18,7 @@ import {
   saveLocalProgress,
   getLocalProgress
 } from '../data/local-db.js';
+import { downloadFileFromCloud } from '../data/cloud-db.js';
 import { icon } from '../ui/icons.js';
 import { showToast } from '../ui/toast.js';
 
@@ -284,7 +286,27 @@ export function ReaderPage({ container, params, query, router }) {
     const pdfContainer = container.querySelector('#rm-pdf-container');
     const viewport = container.querySelector('#rm-viewport');
 
-    const hasFileData = Boolean(doc._cachedBlob || doc.pdf_url || doc.pdf_key);
+    let hasFileData = Boolean(doc._cachedBlob || doc.pdf_url || doc.pdf_key);
+    if (!hasFileData) {
+      pdfContainer.innerHTML = `
+        <div style="padding:var(--space-8);color:var(--ink-muted);text-align:center;">
+          <div style="margin-bottom:var(--space-2);">${icon('cloud', 'style="width:36px;height:36px;"')}</div>
+          Mengunduh berkas modul dari Cloud Database…
+        </div>
+      `;
+      try {
+        const cloudBlob = await downloadFileFromCloud(doc.id);
+        if (cloudBlob && cloudBlob.size > 0) {
+          doc._cachedBlob = cloudBlob;
+          hasFileData = true;
+          // Simpan ke cache IndexedDB agar cepat saat dibuka kembali
+          await saveLocalDocument(doc, cloudBlob);
+        }
+      } catch (err) {
+        console.warn('Gagal unduh file dari cloud D1:', err);
+      }
+    }
+
     if (!hasFileData) {
       pdfContainer.innerHTML = `
         <div style="padding:var(--space-8);text-align:center;max-width:540px;margin:var(--space-8) auto;background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius-lg);box-shadow:var(--shadow-float);">
@@ -304,7 +326,7 @@ export function ReaderPage({ container, params, query, router }) {
         attachInput.addEventListener('change', async (e) => {
           const file = e.target.files && e.target.files[0];
           if (file) {
-            showToast('Menyimpan file dokumen…');
+            showToast('Menyimpan file dokumen ke Cloud…');
             await saveLocalDocument(doc, file);
             doc._cachedBlob = file;
             setupViewer();
