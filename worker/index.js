@@ -43,6 +43,13 @@ export default {
 
     // 3. GET/PUT /api/file/*: Proxy file R2
     if (url.pathname.startsWith('/api/file/')) {
+      if (!env.BUCKET) {
+        return new Response(JSON.stringify({ error: 'R2 Bucket tidak dikonfigurasi' }), {
+          status: 503,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+
       const key = url.pathname.replace('/api/file/', '');
 
       if (request.method === 'PUT') {
