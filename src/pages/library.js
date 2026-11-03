@@ -8,6 +8,22 @@ import { icon } from '../ui/icons.js';
 
 export function LibraryPage({ container, router }) {
   let isDarkMode = document.documentElement.dataset.theme === 'dark';
+  let lastLoadedDocCount = -1;
+
+  // Dengarkan event sinkronisasi cloud D1: jika modul baru ditarik dari cloud, segarkan rak otomatis
+  const onSyncChanged = async (e) => {
+    if (container.isConnected) {
+      if (e.detail && !e.detail.isSyncing) {
+        const freshDocs = await getAllLocalDocuments();
+        if (freshDocs.length !== lastLoadedDocCount) {
+          render();
+        }
+      }
+    } else {
+      window.removeEventListener('rak-sync-changed', onSyncChanged);
+    }
+  };
+  window.addEventListener('rak-sync-changed', onSyncChanged);
 
   function toggleTheme() {
     isDarkMode = !isDarkMode;
@@ -40,6 +56,7 @@ export function LibraryPage({ container, router }) {
 
   async function render() {
     const docs = await loadData();
+    lastLoadedDocCount = docs.length;
     const dueCards = await getDueLocalFlashcards();
     const allTodos = await getAllTodos().catch(() => []);
     const pendingTodos = allTodos.filter(t => !t.completed);
@@ -337,7 +354,9 @@ export function LibraryPage({ container, router }) {
           updateSyncUI();
           render();
         } else {
-          alert('Gagal sinkron: ' + (res.error || res.reason));
+          const errText = res.error || (res.reason === 'already_syncing' ? 'Sedang menyinkronkan...' : res.reason);
+          showToast('Status sinkronisasi: ' + errText);
+          updateSyncUI();
         }
       });
     }
@@ -406,7 +425,8 @@ export function LibraryPage({ container, router }) {
           showToast('Sinkronisasi cloud berhasil!');
           render();
         } else {
-          alert('Gagal sinkron: ' + (res.error || res.reason));
+          const errText = res.error || (res.reason === 'already_syncing' ? 'Sedang menyinkronkan...' : res.reason);
+          showToast('Status sinkronisasi: ' + errText);
         }
       });
     }

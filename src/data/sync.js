@@ -3,6 +3,7 @@ import { initLocalDB } from './local-db.js';
 import { supabase, isSupabaseConfigured } from './supabase.js';
 
 let isSyncing = false;
+let activeSyncPromise = null;
 let lastSyncTime = null;
 let lastSyncError = null;
 let d1Available = null; // null: belum diuji, true: aktif, false: tidak ada
@@ -79,6 +80,12 @@ export async function pushAllToD1() {
     payload.study_sessions = await db.getAll('study_sessions');
   }
 
+  // Jika perangkat ini baru dibuka dan masih kosong, tidak perlu kirim payload kosong
+  const hasLocalData = Object.values(payload).some(arr => arr.length > 0);
+  if (!hasLocalData) {
+    return { success: true, processed: 0, note: 'empty_local' };
+  }
+
   const res = await fetch('/api/db/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -104,11 +111,13 @@ export async function pullAllFromD1() {
 
   // 1. Todos
   if (Array.isArray(data.todos) && data.todos.length > 0) {
-    const tx = db.transaction('todos', 'readwrite');
     for (const t of data.todos) {
-      await tx.store.put(t);
+      try {
+        await db.put('todos', t);
+      } catch (err) {
+        console.warn('Gagal simpan todo ke IndexedDB:', t.id, err);
+      }
     }
-    await tx.done;
     try {
       localStorage.setItem('rak_modul_todos_cache', JSON.stringify(data.todos));
     } catch (_) {}
@@ -116,48 +125,72 @@ export async function pullAllFromD1() {
 
   // 2. Documents
   if (Array.isArray(data.documents) && data.documents.length > 0) {
-    const tx = db.transaction('documents', 'readwrite');
     for (const d of data.documents) {
-      const existing = await tx.store.get(d.id);
-      await tx.store.put({ ...d, _cachedBlob: existing?._cachedBlob || null });
+      try {
+        const existing = await db.get('documents', d.id);
+        await db.put('documents', {
+          ...d,
+          _cachedBlob: existing?._cachedBlob || null
+        });
+      } catch (err) {
+        console.warn('Gagal simpan dokumen ke IndexedDB:', d.id, err);
+      }
     }
-    await tx.done;
   }
 
   // 3. Code Notebooks
   if (Array.isArray(data.code_notebooks) && data.code_notebooks.length > 0) {
-    const tx = db.transaction('code_notebooks', 'readwrite');
     for (const nb of data.code_notebooks) {
-      await tx.store.put(nb);
+      try {
+        await db.put('code_notebooks', nb);
+      } catch (err) {
+        console.warn('Gagal simpan notebook ke IndexedDB:', nb.id, err);
+      }
     }
-    await tx.done;
   }
 
   // 4. Annotations
   if (Array.isArray(data.annotations) && data.annotations.length > 0) {
-    const tx = db.transaction('annotations', 'readwrite');
     for (const a of data.annotations) {
-      await tx.store.put(a);
+      try {
+        await db.put('annotations', a);
+      } catch (err) {
+        console.warn('Gagal simpan anotasi ke IndexedDB:', a.id, err);
+      }
     }
-    await tx.done;
   }
 
   // 5. Reading Progress
   if (Array.isArray(data.reading_progress) && data.reading_progress.length > 0) {
-    const tx = db.transaction('reading_progress', 'readwrite');
     for (const p of data.reading_progress) {
-      await tx.store.put(p);
+      try {
+        await db.put('reading_progress', p);
+      } catch (err) {
+        console.warn('Gagal simpan reading_progress ke IndexedDB:', p.document_id, err);
+      }
     }
-    await tx.done;
   }
 
   // 6. Flashcards
   if (Array.isArray(data.flashcards) && data.flashcards.length > 0) {
-    const tx = db.transaction('flashcards', 'readwrite');
     for (const fc of data.flashcards) {
-      await tx.store.put(fc);
+      try {
+        await db.put('flashcards', fc);
+      } catch (err) {
+        console.warn('Gagal simpan flashcard ke IndexedDB:', fc.id, err);
+      }
     }
-    await tx.done;
+  }
+
+  // 7. Study Sessions
+  if (Array.isArray(data.study_sessions) && data.study_sessions.length > 0) {
+    for (const s of data.study_sessions) {
+      try {
+        await db.put('study_sessions', s);
+      } catch (err) {
+        console.warn('Gagal simpan session ke IndexedDB:', s.id, err);
+      }
+    }
   }
 
   return data;
@@ -218,41 +251,46 @@ export async function testSupabaseConnection() {
 }
 
 export async function fullSync() {
-  if (isSyncing) return { success: false, reason: 'already_syncing' };
-  isSyncing = true;
-  lastSyncError = null;
-  notifySyncChange();
-
-  try {
-    // 1. Cek Cloudflare D1 terlebih dahulu
-    const status = await checkD1Status();
-    if (status && status.ok) {
-      await pushAllToD1();
-      await pullAllFromD1();
-      lastSyncTime = new Date().toISOString();
-      isSyncing = false;
-      notifySyncChange();
-      return { success: true, target: 'Cloudflare D1 (rakmodule)', time: lastSyncTime };
-    }
-
-    // 2. Jika D1 belum aktif, gunakan Supabase jika dikonfigurasi
-    if (isSupabaseConfigured()) {
-      await flushSyncQueue();
-      lastSyncTime = new Date().toISOString();
-      isSyncing = false;
-      notifySyncChange();
-      return { success: true, target: 'Supabase', time: lastSyncTime };
-    }
-
-    isSyncing = false;
-    notifySyncChange();
-    return { success: false, reason: 'unconfigured' };
-  } catch (err) {
-    lastSyncError = err.message;
-    isSyncing = false;
-    notifySyncChange();
-    return { success: false, error: err.message };
+  // Jika sinkronisasi sedang berjalan, tunggu hingga proses selesai
+  if (activeSyncPromise) {
+    return activeSyncPromise;
   }
+
+  activeSyncPromise = (async () => {
+    isSyncing = true;
+    lastSyncError = null;
+    notifySyncChange();
+
+    try {
+      // 1. Cek Cloudflare D1 terlebih dahulu
+      const status = await checkD1Status();
+      if (status && status.ok) {
+        await pushAllToD1();
+        await pullAllFromD1();
+        lastSyncTime = new Date().toISOString();
+        return { success: true, target: 'Cloudflare D1 (rakmodule)', time: lastSyncTime };
+      }
+
+      // 2. Jika D1 belum aktif, gunakan Supabase jika dikonfigurasi
+      if (isSupabaseConfigured()) {
+        await flushSyncQueue();
+        lastSyncTime = new Date().toISOString();
+        return { success: true, target: 'Supabase', time: lastSyncTime };
+      }
+
+      return { success: false, reason: 'unconfigured' };
+    } catch (err) {
+      console.error('fullSync error:', err);
+      lastSyncError = err.message;
+      return { success: false, error: err.message };
+    } finally {
+      isSyncing = false;
+      activeSyncPromise = null;
+      notifySyncChange();
+    }
+  })();
+
+  return activeSyncPromise;
 }
 
 // -------------------------------------------------------------
@@ -260,10 +298,10 @@ export async function fullSync() {
 // -------------------------------------------------------------
 
 if (typeof window !== 'undefined') {
-  // Sync otomatis saat web dibuka
+  // Sync otomatis saat web dibuka (tunggu 500ms agar IndexedDB siap)
   setTimeout(() => {
     fullSync().catch(err => console.log('Auto initial sync note:', err));
-  }, 2000);
+  }, 500);
 
   // Sync saat koneksi internet kembali online
   window.addEventListener('online', () => {

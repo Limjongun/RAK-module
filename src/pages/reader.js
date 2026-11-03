@@ -284,6 +284,36 @@ export function ReaderPage({ container, params, query, router }) {
     const pdfContainer = container.querySelector('#rm-pdf-container');
     const viewport = container.querySelector('#rm-viewport');
 
+    const hasFileData = Boolean(doc._cachedBlob || doc.pdf_url || doc.pdf_key);
+    if (!hasFileData) {
+      pdfContainer.innerHTML = `
+        <div style="padding:var(--space-8);text-align:center;max-width:540px;margin:var(--space-8) auto;background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius-lg);box-shadow:var(--shadow-float);">
+          <div style="margin-bottom:var(--space-3);color:var(--pen);">${icon('cloud', 'style="width:48px;height:48px;"')}</div>
+          <h3 style="font-size:18px;font-weight:600;margin-bottom:var(--space-2);">${doc.title}</h3>
+          <p style="color:var(--ink-muted);font-size:14px;line-height:1.5;margin-bottom:var(--space-6);">
+            Modul ini tersinkronisasi dari Cloud D1. Untuk membuka lembar halaman dokumen secara penuh di perangkat ini, silakan hubungkan file <b>.${doc.source_type || 'docx'}</b> dari komputer Anda.
+          </p>
+          <label class="rm-btn rm-btn-primary" style="cursor:pointer;display:inline-flex;align-items:center;gap:var(--space-2);padding:10px 20px;font-weight:600;">
+            ${icon('upload')} Hubungkan File dari Komputer Ini
+            <input type="file" id="rm-attach-local-file" accept="${doc.source_type === 'docx' ? '.docx' : '.pdf'}" style="display:none;">
+          </label>
+        </div>
+      `;
+      const attachInput = pdfContainer.querySelector('#rm-attach-local-file');
+      if (attachInput) {
+        attachInput.addEventListener('change', async (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (file) {
+            showToast('Menyimpan file dokumen…');
+            await saveLocalDocument(doc, file);
+            doc._cachedBlob = file;
+            setupViewer();
+          }
+        });
+      }
+      return;
+    }
+
     if (doc.source_type === 'docx') {
       pdfContainer.innerHTML = `
         <div style="padding:var(--space-8);color:var(--ink-muted);text-align:center;">
