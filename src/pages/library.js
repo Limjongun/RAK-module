@@ -1,5 +1,5 @@
 // Rak Modul — Halaman Utama (Library / Shelf View)
-import { getAllLocalDocuments, getLocalProgress, getLocalAnnotations, saveLocalDocument, saveLocalPages, getDueLocalFlashcards, getAllTodos } from '../data/local-db.js';
+import { getAllLocalDocuments, getLocalDocument, getLocalProgress, getLocalAnnotations, saveLocalDocument, deleteLocalDocument, saveLocalPages, getDueLocalFlashcards, getAllTodos } from '../data/local-db.js';
 import { getSupabaseCredentials, saveSupabaseCredentials, isSupabaseConfigured } from '../data/supabase.js';
 import { fullSync, testSupabaseConnection, getSyncState, checkD1Status } from '../data/sync.js';
 import { uploadFileToCloud } from '../data/cloud-db.js';
@@ -133,6 +133,9 @@ export function LibraryPage({ container, router }) {
             ${icon('list-todo')} To-Do
             ${pendingTodos.length > 0 ? `<span class="rm-badge rm-badge-pen" style="font-size:10px;padding:1px 5px;margin-left:2px;">${pendingTodos.length}</span>` : ''}
           </a>
+          <a href="#/write" class="rm-btn rm-btn-ghost" title="Tulis Dokumen Baru">
+            ${icon('edit')} Tulis Dokumen
+          </a>
           <a href="#/upload" class="rm-btn rm-btn-primary">
             ${icon('upload')} Unggah modul
           </a>
@@ -164,20 +167,42 @@ export function LibraryPage({ container, router }) {
                 ${
                   recentDoc.thumb_data
                     ? `<img src="${recentDoc.thumb_data}" alt="Sampul">`
-                    : `<svg viewBox="0 0 64 84" width="80" height="105"><rect width="100%" height="100%" fill="var(--surface-sunken)"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="var(--ink-muted)" font-size="10">PDF</text></svg>`
+                    : `<div class="rm-thumb-placeholder"><span>${(recentDoc.source_type || 'PDF').toUpperCase()}</span></div>`
                 }
               </div>
               <div class="rm-continue-content">
-                <h3 style="font-size: 20px; font-weight: 600; margin: 0 0 4px;">${recentDoc.title}</h3>
-                <p class="rm-muted" style="margin: 0 0 var(--space-3); font-size: 14px;">
-                  ${recentDoc.course_name ? `${recentDoc.course_name} · ` : ''}${recentDoc.page_count || 1} halaman · ${recentDoc.annotCount} catatan
-                </p>
+                <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+                  <div style="min-width:0;">
+                    <h3 style="font-size: 20px; font-weight: 600; margin: 0 0 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${recentDoc.title}">${recentDoc.title}</h3>
+                    <p class="rm-muted" style="margin: 0 0 var(--space-3); font-size: 14px;">
+                      ${recentDoc.course_name ? `${recentDoc.course_name} · ` : ''}${recentDoc.page_count || 1} halaman · ${recentDoc.annotCount} catatan
+                    </p>
+                  </div>
+                  <div style="display:flex;gap:4px;flex-shrink:0;">
+                    <button type="button" class="rm-btn rm-btn-ghost rm-btn-icon rm-action-change-cover" data-id="${recentDoc.id}" title="Ganti Gambar Cover">
+                      ${icon('image')}
+                    </button>
+                    ${recentDoc.source_type === 'doc' ? `
+                      <a href="#/write/${recentDoc.id}" class="rm-btn rm-btn-ghost rm-btn-icon" title="Edit Dokumen">
+                        ${icon('edit')}
+                      </a>
+                    ` : ''}
+                    <button type="button" class="rm-btn rm-btn-ghost rm-btn-icon rm-action-delete-module" data-id="${recentDoc.id}" data-title="${encodeURIComponent(recentDoc.title)}" title="Hapus Modul" style="color:var(--correction);">
+                      ${icon('trash')}
+                    </button>
+                  </div>
+                </div>
                 <div class="rm-progress" style="width: 280px; margin-bottom: var(--space-4);">
                   <i style="width: ${recentDoc.progress.percent || 0}%"></i>
                 </div>
-                <a href="#/read/${recentDoc.id}?p=${recentDoc.progress.last_page || 1}" class="rm-btn rm-btn-primary">
-                  Lanjut dari hal. ${recentDoc.progress.last_page || 1}
-                </a>
+                <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;">
+                  <a href="#/read/${recentDoc.id}?p=${recentDoc.progress.last_page || 1}" class="rm-btn rm-btn-primary">
+                    Lanjut dari hal. ${recentDoc.progress.last_page || 1}
+                  </a>
+                  <button type="button" class="rm-btn rm-btn-ghost rm-action-change-cover" data-id="${recentDoc.id}">
+                    ${icon('image')} Ganti Cover
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -192,7 +217,10 @@ export function LibraryPage({ container, router }) {
             <p style="font-size: 17px; color: var(--ink-muted); margin-bottom: var(--space-4);">
               Rak masih kosong. Seret PDF ke sini untuk mulai membaca dan mencatat.
             </p>
-            <div style="display:flex;justify-content:center;gap:var(--space-3);">
+            <div style="display:flex;justify-content:center;gap:var(--space-3);flex-wrap:wrap;">
+              <a href="#/write" class="rm-btn rm-btn-ghost">
+                ${icon('edit')} Tulis Dokumen Baru
+              </a>
               <button id="rm-btn-load-sample" class="rm-btn rm-btn-ghost">
                 ${icon('book')} Muat Contoh Modul (CS170)
               </button>
@@ -211,29 +239,49 @@ export function LibraryPage({ container, router }) {
               ${courseDocs
                 .map(
                   (doc) => `
-                <a class="rm-card" href="#/read/${doc.id}?p=${doc.progress.last_page || 1}">
-                  <span class="rm-thumb" aria-hidden="true">
-                    ${
-                      doc.thumb_data
-                        ? `<img src="${doc.thumb_data}" alt="Sampul">`
-                        : `<svg viewBox="0 0 64 84" width="64" height="84"><rect width="100%" height="100%" fill="var(--surface-sunken)"/></svg>`
-                    }
-                  </span>
-                  <span class="rm-card-body">
-                    <p class="rm-card-title">${doc.title}</p>
-                    <p class="rm-card-meta">
-                      <span class="rm-badge" style="font-size:10px;padding:0 4px;margin-right:4px;">${(doc.source_type || 'PDF').toUpperCase()}</span>
-                      ${doc.course_code || courseName}, ${doc.page_count || 1} halaman
-                    </p>
-                    <span class="rm-progress" role="progressbar" aria-valuenow="${doc.progress.percent || 0}">
-                      <i style="width: ${doc.progress.percent || 0}%"></i>
+                <div class="rm-card-wrapper" data-doc-id="${doc.id}">
+                  <a class="rm-card" href="#/read/${doc.id}?p=${doc.progress.last_page || 1}">
+                    <span class="rm-thumb" aria-hidden="true">
+                      ${
+                        doc.thumb_data
+                          ? `<img src="${doc.thumb_data}" alt="Sampul">`
+                          : `<div class="rm-thumb-placeholder"><span>${(doc.source_type || 'PDF').toUpperCase()}</span></div>`
+                      }
                     </span>
-                    <span class="rm-card-foot">
-                      <span>${doc.progress.percent > 0 ? `Hal. ${doc.progress.last_page}` : 'Belum dibuka'}</span>
-                      <span>${doc.annotCount > 0 ? `${doc.annotCount} catatan` : ''}</span>
+                    <span class="rm-card-body">
+                      <p class="rm-card-title" title="${doc.title}">${doc.title}</p>
+                      <p class="rm-card-meta">
+                        <span class="rm-badge" style="font-size:10px;padding:0 4px;margin-right:4px;">${(doc.source_type || 'PDF').toUpperCase()}</span>
+                        ${doc.course_code || courseName}, ${doc.page_count || 1} halaman
+                      </p>
+                      <span class="rm-progress" role="progressbar" aria-valuenow="${doc.progress.percent || 0}">
+                        <i style="width: ${doc.progress.percent || 0}%"></i>
+                      </span>
+                      <span class="rm-card-foot">
+                        <span>${doc.progress.percent > 0 ? `Hal. ${doc.progress.last_page}` : 'Belum dibuka'}</span>
+                        <span>${doc.annotCount > 0 ? `${doc.annotCount} catatan` : ''}</span>
+                      </span>
                     </span>
-                  </span>
-                </a>
+                  </a>
+                  <div class="rm-card-menu-dropdown">
+                    <button type="button" class="rm-card-menu-trigger" aria-label="Opsi modul">
+                      ${icon('more')}
+                    </button>
+                    <div class="rm-card-menu-popover">
+                      <button type="button" class="rm-card-menu-item rm-action-change-cover" data-id="${doc.id}">
+                        ${icon('image')} Ganti Cover
+                      </button>
+                      ${doc.source_type === 'doc' ? `
+                        <a href="#/write/${doc.id}" class="rm-card-menu-item">
+                          ${icon('edit')} Edit Dokumen
+                        </a>
+                      ` : ''}
+                      <button type="button" class="rm-card-menu-item rm-card-menu-danger rm-action-delete-module" data-id="${doc.id}" data-title="${encodeURIComponent(doc.title)}">
+                        ${icon('trash')} Hapus Modul
+                      </button>
+                    </div>
+                  </div>
+                </div>
               `
                 )
                 .join('')}
@@ -243,6 +291,7 @@ export function LibraryPage({ container, router }) {
                 )
                 .join('')
         }
+        <input type="file" id="rm-cover-file-input" accept="image/*" style="display:none;" />
       </main>
 
       <!-- MODAL PENGATURAN SINKRONISASI CLOUD -->
@@ -541,6 +590,137 @@ export function LibraryPage({ container, router }) {
         e.preventDefault();
         searchInput.focus();
       }
+    });
+
+    // Helper resize gambar cover modul menjadi format Base64 JPEG ringan (~320x440, ~25KB)
+    function resizeImageToDataUrl(file, maxWidth = 320, maxHeight = 440) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+            if (width > height) {
+              if (width > maxWidth) {
+                height = Math.round((height * maxWidth) / width);
+                width = maxWidth;
+              }
+            } else {
+              if (height > maxHeight) {
+                width = Math.round((width * maxHeight) / height);
+                height = maxHeight;
+              }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
+          };
+          img.onerror = reject;
+          img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // Dropdown opsi modul (⋮)
+    const cardDropdowns = container.querySelectorAll('.rm-card-menu-dropdown');
+    cardDropdowns.forEach(dd => {
+      const trigger = dd.querySelector('.rm-card-menu-trigger');
+      if (trigger) {
+        trigger.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const isOpen = dd.classList.contains('is-open');
+          cardDropdowns.forEach(other => other.classList.remove('is-open'));
+          if (!isOpen) {
+            dd.classList.add('is-open');
+          }
+        });
+      }
+    });
+
+    const closeAnyOpenDropdown = (e) => {
+      if (!e.target.closest('.rm-card-menu-dropdown')) {
+        container.querySelectorAll('.rm-card-menu-dropdown.is-open').forEach(dd => {
+          dd.classList.remove('is-open');
+        });
+      }
+    };
+    document.addEventListener('click', closeAnyOpenDropdown);
+
+    // Ganti / Unggah Cover Modul
+    let activeCoverDocId = null;
+    const coverFileInput = container.querySelector('#rm-cover-file-input');
+    const changeCoverBtns = container.querySelectorAll('.rm-action-change-cover');
+
+    changeCoverBtns.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const dd = btn.closest('.rm-card-menu-dropdown');
+        if (dd) dd.classList.remove('is-open');
+
+        activeCoverDocId = btn.dataset.id;
+        if (coverFileInput) {
+          coverFileInput.value = '';
+          coverFileInput.click();
+        }
+      });
+    });
+
+    if (coverFileInput) {
+      coverFileInput.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file || !activeCoverDocId) return;
+
+        try {
+          showToast('Mengompresi gambar cover...');
+          const resizedDataUrl = await resizeImageToDataUrl(file);
+          const doc = (await getLocalDocument(activeCoverDocId)) || docs.find(d => d.id === activeCoverDocId);
+          if (doc) {
+            doc.thumb_data = resizedDataUrl;
+            doc.updated_at = new Date().toISOString();
+            await saveLocalDocument(doc);
+            showToast('Gambar cover berhasil diperbarui!');
+            render();
+          }
+        } catch (err) {
+          console.error('Cover upload error:', err);
+          showToast('Gagal memproses gambar: ' + err.message);
+        }
+      });
+    }
+
+    // Hapus Modul
+    const deleteBtns = container.querySelectorAll('.rm-action-delete-module');
+    deleteBtns.forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const dd = btn.closest('.rm-card-menu-dropdown');
+        if (dd) dd.classList.remove('is-open');
+
+        const docId = btn.dataset.id;
+        const docTitle = decodeURIComponent(btn.dataset.title || 'modul');
+
+        if (window.confirm(`Hapus modul "${docTitle}"?\n\nSemua catatan, coretan, dan progres baca modul ini akan dihapus permanen.`)) {
+          try {
+            await deleteLocalDocument(docId);
+            showToast(`Modul "${docTitle}" berhasil dihapus`);
+            render();
+          } catch (err) {
+            console.error('Delete module error:', err);
+            showToast('Gagal menghapus modul: ' + err.message);
+          }
+        }
+      });
     });
   }
 

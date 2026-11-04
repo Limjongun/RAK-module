@@ -15,6 +15,7 @@ async function ensureTables(db) {
         original_key TEXT,
         pdf_key TEXT,
         thumb_key TEXT,
+        thumb_data TEXT,
         page_count INTEGER DEFAULT 1,
         language TEXT DEFAULT 'id',
         tags TEXT DEFAULT '[]',
@@ -135,6 +136,10 @@ async function ensureTables(db) {
       )
     `)
   ]);
+
+  try {
+    await db.prepare('ALTER TABLE documents ADD COLUMN thumb_data TEXT').run();
+  } catch (_) {}
 }
 
 export default {
@@ -246,12 +251,13 @@ export default {
           if (Array.isArray(body.documents)) {
             for (const d of body.documents) {
               statements.push(env.DB.prepare(`
-                INSERT INTO documents (id, user_id, title, source_type, course_id, course_name, page_count, language, tags, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO documents (id, user_id, title, source_type, course_id, course_name, thumb_data, page_count, language, tags, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   title=excluded.title,
                   source_type=excluded.source_type,
                   course_name=excluded.course_name,
+                  thumb_data=coalesce(excluded.thumb_data, documents.thumb_data),
                   page_count=excluded.page_count,
                   tags=excluded.tags,
                   status=excluded.status,
@@ -259,6 +265,7 @@ export default {
               `).bind(
                 d.id, d.user_id || 'default_user', d.title || 'Dokumen Tanpa Judul',
                 d.source_type || 'pdf', d.course_id || null, d.course_name || 'Umum',
+                d.thumb_data || null,
                 Number(d.page_count) || 1, d.language || 'id',
                 JSON.stringify(d.tags || []), d.status || 'ready',
                 d.created_at || new Date().toISOString(), d.updated_at || new Date().toISOString()

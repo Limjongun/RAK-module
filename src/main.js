@@ -10,7 +10,9 @@ import { ReviewPage } from './pages/review.js';
 import { StatsPage } from './pages/stats.js';
 import { CodeBankPage } from './pages/code-bank.js';
 import { TodosPage } from './pages/todos.js';
+import { WriterPage } from './pages/writer.js';
 import { flushSyncQueue } from './data/sync.js';
+import './styles/writer.css';
 
 // Setup Tema (Sistem / Saved)
 const savedTheme = localStorage.getItem('theme');
@@ -34,7 +36,9 @@ const routes = [
   { path: '/stats', component: StatsPage },
   { path: '/code', component: CodeBankPage },
   { path: '/todos', component: TodosPage },
-  { path: '/tasks', component: TodosPage }
+  { path: '/tasks', component: TodosPage },
+  { path: '/write', component: WriterPage },
+  { path: '/write/:id', component: WriterPage }
 ];
 
 const router = new Router(routes, 'app');

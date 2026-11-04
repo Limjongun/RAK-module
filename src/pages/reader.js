@@ -72,6 +72,12 @@ export function ReaderPage({ container, params, query, router }) {
           </div>
 
           <div style="display:flex;align-items:center;gap:var(--space-2);">
+            ${doc.source_type === 'doc' || doc.source_type === 'note' ? `
+              <a href="#/write/${doc.id}" class="rm-btn rm-btn-ghost rm-btn-icon" title="Edit Dokumen Ini di Writer" style="margin-right:2px;">
+                ${icon('edit')}
+              </a>
+            ` : ''}
+
             <!-- Pomodoro Timer Widget -->
             <div class="rm-pomo-widget" style="display:flex;align-items:center;background:var(--surface-sunken);border:1px solid var(--line);border-radius:var(--radius-pill);padding:2px 8px;gap:6px;">
               <span style="color:var(--pen);display:flex;align-items:center;" title="Timer Belajar Pomodoro">${icon('timer', 'style="width:15px;height:15px;"')}</span>
@@ -152,8 +158,8 @@ export function ReaderPage({ container, params, query, router }) {
         const toggleBtn = container.querySelector('#rm-btn-pomo-toggle');
         if (timeEl) timeEl.textContent = formattedTime;
         if (toggleBtn) {
-          toggleBtn.innerHTML = isRunning 
-            ? icon('pause', 'style="width:11px;height:11px;"') 
+          toggleBtn.innerHTML = isRunning
+            ? icon('pause', 'style="width:11px;height:11px;"')
             : icon('play', 'style="width:11px;height:11px;"');
           toggleBtn.title = isRunning ? 'Jeda Pomodoro' : 'Mulai Pomodoro';
         }
@@ -333,6 +339,57 @@ export function ReaderPage({ container, params, query, router }) {
           }
         });
       }
+      return;
+    }
+
+    // Dokumen Buatan Sendiri (Format Tulis Dokumen Cepat .doc/.note)
+    if (doc.source_type === 'doc' || doc.source_type === 'note') {
+      let htmlText = '';
+      if (doc._cachedBlob instanceof Blob) {
+        htmlText = await doc._cachedBlob.text();
+      } else if (typeof doc._cachedBlob === 'string') {
+        htmlText = doc._cachedBlob;
+      } else if (doc.pdf_url) {
+        try {
+          const resp = await fetch(doc.pdf_url);
+          htmlText = await resp.text();
+        } catch (_) {}
+      }
+
+      docxWrapper = document.createElement('div');
+      docxWrapper.className = 'rm-docx-container';
+      pdfContainer.innerHTML = '';
+      pdfContainer.appendChild(docxWrapper);
+
+      const sec = document.createElement('section');
+      sec.className = 'docx rm-pdf-page';
+      sec.dataset.pageNo = 1;
+      sec.id = 'rm-page-1';
+      sec.innerHTML = `<article style="padding:16px 8px;font-size:16px;line-height:1.7;">${htmlText}</article>`;
+      docxWrapper.appendChild(sec);
+
+      sec.querySelectorAll('table').forEach(tbl => {
+        if (!tbl.parentElement.classList.contains('rm-table-scroll')) {
+          const wrap = document.createElement('div');
+          wrap.className = 'rm-table-scroll';
+          tbl.parentElement.insertBefore(wrap, tbl);
+          wrap.appendChild(tbl);
+        }
+      });
+
+      doc.page_count = 1;
+      const indicator = container.querySelector('#rm-page-indicator');
+      if (indicator) indicator.textContent = `Hal. 1 dari 1`;
+
+      pageTexts.set(1, sec.textContent || '');
+
+      outline = [];
+      const headingEls = docxWrapper.querySelectorAll('h1, h2, h3, h4');
+      headingEls.forEach((hEl, idx) => {
+        hEl.id = hEl.id || `rm-doc-h-${idx + 1}`;
+        outline.push({ title: hEl.textContent.trim(), pageNo: 1, elementId: hEl.id });
+      });
+      renderSidebarContent();
       return;
     }
 

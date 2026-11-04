@@ -129,6 +129,7 @@ export async function syncFromCloudToLocal() {
           const existing = await db.get('documents', d.id);
           await db.put('documents', {
             ...d,
+            thumb_data: d.thumb_data || existing?.thumb_data || null,
             _cachedBlob: existing?._cachedBlob || null
           });
         } catch (_) {}
@@ -198,3 +199,4 @@ export async function syncFromCloudToLocal() {
     return null;
   }
 }
+
