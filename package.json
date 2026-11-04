@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "deploy": "wrangler deploy",
     "test": "node tests/comprehensive-test.mjs"
   },
   "dependencies": {
@@ -22,6 +23,8 @@
     "perfect-freehand": "^1.2.2"
   },
   "devDependencies": {
-    "vite": "^5.4.10"
+    "@cloudflare/workerd-windows-64": "^1.20261104.1",
+    "vite": "^5.4.10",
+    "wrangler": "^4.157.0"
   }
 }
